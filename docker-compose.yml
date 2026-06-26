@@ -1,0 +1,47 @@
+
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: ciw-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-demo123456}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-customer_workbench}
+      MYSQL_USER: ${MYSQL_USER:-demo_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-demo_pass}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-demo123456}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+  neo4j:
+    image: neo4j:5
+    container_name: ciw-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/demo123456}
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 128m
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-demo123456}", "RETURN 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+volumes:
+  mysql-data:
+  neo4j-data:
