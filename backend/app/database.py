@@ -51,9 +51,11 @@ def create_tables() -> None:
     MySQL 不可达时打印警告并跳过（测试可用 SQLite 替代）。"""
     import logging
 
-    from app.models.document import Base  # noqa: F811
+    from app.models.document import Base as DocBase  # noqa: F811
+    from app.models.conversation import Base as ConvBase  # noqa: F811
 
     try:
-        Base.metadata.create_all(bind=_get_engine())
+        DocBase.metadata.create_all(bind=_get_engine())
+        ConvBase.metadata.create_all(bind=_get_engine())
     except Exception as exc:
         logging.warning("create_tables 跳过: MySQL 不可达 (%s)", exc)
