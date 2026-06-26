@@ -130,7 +130,8 @@ training/
 │   ├── validate_data.py        # 数据校验脚本
 │   └── metrics.py              # 指标计算（accuracy/macro-F1/混淆矩阵/错误样例）
 ├── reports/
-│   └── .gitkeep                 # 真实报告训练后生成于此目录
+│   ├── .gitkeep                         # 真实报告训练后生成于此目录
+│   └── 20260627-qlora-result.md         # 2026-06-27 训练结果
 ├── tests/
 │   └── test_training_data.py   # 本地测试
 ├── train_qlora.py              # QLoRA 训练脚本

@@ -217,15 +217,11 @@ class IntentDataset(_DatasetBase):
             truncation=True,
             max_length=self.max_length,
             padding=False,
-            return_tensors="pt",
         )
-        input_ids = encoding["input_ids"][0]
-        attention_mask = encoding["attention_mask"][0]
-        # labels = input_ids（loss 只在 assistant 部分计算，但这里简化处理）
+        # DataCollatorForLanguageModeling 会统一 padding 并生成 labels。
         return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": input_ids.clone(),
+            "input_ids": encoding["input_ids"],
+            "attention_mask": encoding["attention_mask"],
         }
 
 
@@ -270,7 +266,7 @@ def train(config: TrainConfig):
         weight_decay=config.weight_decay,
         logging_steps=config.logging_steps,
         save_steps=config.save_steps,
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         eval_steps=config.save_steps,
         save_total_limit=2,
         load_best_model_at_end=True,

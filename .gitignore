@@ -18,8 +18,10 @@ neo4j-data/
 backend/data/chroma/
 
 # Training artifacts
+training/runs/
 training/reports/*
 !training/reports/.gitkeep
+!training/reports/*.md
 *.pt
 *.bin
 *.safetensors
@@ -27,6 +29,9 @@ training/reports/*
 *.pth
 *.onnx
 *.pkl
+*.tar.gz
+*.rar
+*.zip
 checkpoints/
 outputs/
 /models/
