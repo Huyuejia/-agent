@@ -16,6 +16,11 @@ class Settings(BaseSettings):
 
     demo_user_id: int = 1
 
+    # BGE-M3 local model
+    bge_model_path: str = "/mnt/d/master/RAG_local/bge_m3"
+    bge_model_name: str = "BAAI/bge-m3"
+    bge_local_files_only: bool = True
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

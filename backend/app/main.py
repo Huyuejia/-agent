@@ -1,7 +1,23 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="Customer Intelligence Workbench", version="0.1.0")
+from app.database import create_tables
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    # 启动时建表
+    create_tables()
+    yield
+
+
+app = FastAPI(
+    title="Customer Intelligence Workbench",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -10,6 +26,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 路由注册
+from app.api.documents import router as documents_router  # noqa: E402
+
+app.include_router(documents_router)
 
 
 @app.get("/health")

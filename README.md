@@ -10,7 +10,7 @@
 | API | FastAPI + Pydantic + SQLAlchemy |
 | 微调 | Qwen2.5-1.5B-Instruct + QLoRA (PEFT + bitsandbytes) |
 | 图谱 | Neo4j 5 |
-| 文档 RAG | Chroma + BAAI/bge-small-zh-v1.5 |
+| 文档 RAG | Chroma + BAAI/bge-m3（设计默认 bge-small-zh-v1.5；本机通过 BGE_MODEL_PATH 使用本地 BGE-M3，模型文件不入仓库） |
 | 关系库 | MySQL 8 |
 
 ## 快速启动
