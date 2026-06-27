@@ -2,6 +2,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    database_url: str | None = None
+
     mysql_host: str = "localhost"
     mysql_port: int = 3306
     mysql_user: str = "demo_user"
@@ -15,6 +17,7 @@ class Settings(BaseSettings):
     chroma_persist_dir: str = "./backend/data/chroma"
 
     demo_user_id: int = 1
+    demo_offline_mode: bool = False
 
     # BGE-M3 local model
     bge_model_path: str = "/mnt/d/master/RAG_local/bge_m3"

@@ -14,8 +14,9 @@ frontend/dist/
 mysql-data/
 neo4j-data/
 
-# Chroma
+# Chroma / local demo data
 backend/data/chroma/
+backend/data/*.db
 
 # Training artifacts
 training/runs/

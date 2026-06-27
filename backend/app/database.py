@@ -16,6 +16,9 @@ _SessionLocal: sessionmaker | None = None
 
 
 def _build_url() -> str:
+    if settings.database_url:
+        return settings.database_url
+
     return (
         f"mysql+pymysql://{settings.mysql_user}:{settings.mysql_password}"
         f"@{settings.mysql_host}:{settings.mysql_port}/{settings.mysql_database}"
@@ -26,7 +29,15 @@ def _build_url() -> str:
 def _get_engine() -> Engine:
     global _engine
     if _engine is None:
-        _engine = create_engine(_build_url(), pool_pre_ping=True, pool_size=5, max_overflow=10)
+        url = _build_url()
+        if url.startswith("sqlite"):
+            _engine = create_engine(
+                url,
+                connect_args={"check_same_thread": False},
+                pool_pre_ping=True,
+            )
+        else:
+            _engine = create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=10)
     return _engine
 
 

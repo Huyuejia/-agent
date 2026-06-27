@@ -81,6 +81,89 @@ def classify_intent(text: str) -> tuple[str, float]:
 
 
 # ---------------------------------------------------------------------------
+# Local demo fallback services
+# ---------------------------------------------------------------------------
+class _OfflineGraphService:
+    """Fictional Zhijia graph used only when DEMO_OFFLINE_MODE=true."""
+
+    _compatibility = {
+        ("Cam-A1", "Hub-Z1"): True,
+        ("Hub-Z1", "Cam-A1"): True,
+        ("Sensor-T1", "Hub-Z1"): True,
+        ("Hub-Z1", "Sensor-T1"): True,
+        ("Lock-D1", "Hub-Z1"): True,
+        ("Hub-Z1", "Lock-D1"): True,
+    }
+    _protocols = {
+        "Cam-A1": ["WiFi", "Zigbee"],
+        "Hub-Z1": ["WiFi", "Zigbee", "Bluetooth"],
+        "Sensor-T1": ["Zigbee"],
+        "Lock-D1": ["Zigbee", "Bluetooth"],
+        "Light-B1": ["WiFi"],
+        "Plug-P1": ["WiFi"],
+    }
+    _warranty = {
+        "Cam-A1": {
+            "policy_name": "标准保修",
+            "duration": "1 年",
+            "description": "非人为损坏免费维修，人为损坏付费维修。",
+        },
+        "Hub-Z1": {
+            "policy_name": "尊享保修",
+            "duration": "3 年",
+            "description": "三年内免费上门换新。",
+        },
+        "Sensor-T1": {
+            "policy_name": "标准保修",
+            "duration": "1 年",
+            "description": "传感器主体一年内非人为故障免费维修。",
+        },
+    }
+
+    @staticmethod
+    def _validate(name: str) -> None:
+        if name not in PRODUCT_WHITELIST:
+            raise ValueError(f"未识别的商品 '{name}'")
+
+    def check_compatibility(self, product_a: str, product_b: str) -> bool:
+        self._validate(product_a)
+        self._validate(product_b)
+        return self._compatibility.get((product_a, product_b), False)
+
+    def get_protocols(self, product_name: str) -> list[str]:
+        self._validate(product_name)
+        return self._protocols.get(product_name, [])
+
+    def get_warranty(self, product_name: str) -> dict | None:
+        self._validate(product_name)
+        return self._warranty.get(product_name)
+
+
+class _OfflineRagService:
+    """Fictional policy snippets used only when DEMO_OFFLINE_MODE=true."""
+
+    def search(self, query: str, top_k: int = 3) -> dict:
+        snippet = "购买后七日内支持无理由退货，商品需保持完好、配件齐全且不影响二次销售。"
+        return {
+            "query": query,
+            "answer": (
+                f"根据已上传的智家政策文档，关于「{query}」找到以下相关信息：\n"
+                f"1. [智家售后政策.pdf | 第 3 页] {snippet}\n"
+                "（以上信息来源于本地演示文档片段。）"
+            ),
+            "source_type": "document_rag",
+            "sources": [
+                {
+                    "document_name": "智家售后政策.pdf",
+                    "location": "第 3 页",
+                    "snippet": snippet,
+                }
+            ],
+            "chunk_count": 1,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 class ChatOrchestrator:
@@ -108,23 +191,32 @@ class ChatOrchestrator:
     @property
     def graph(self):
         if self._graph is None:
-            from app.services.graph_service import GraphService
-            from neo4j import GraphDatabase
             from app.config import settings
 
-            driver = GraphDatabase.driver(
-                settings.neo4j_uri,
-                auth=(settings.neo4j_user, settings.neo4j_password),
-            )
-            self._graph = GraphService(driver)
+            if settings.demo_offline_mode:
+                self._graph = _OfflineGraphService()
+            else:
+                from app.services.graph_service import GraphService
+                from neo4j import GraphDatabase
+
+                driver = GraphDatabase.driver(
+                    settings.neo4j_uri,
+                    auth=(settings.neo4j_user, settings.neo4j_password),
+                )
+                self._graph = GraphService(driver)
         return self._graph
 
     @property
     def rag(self):
         if self._rag is None:
-            from app.services.rag_service import RagService
+            from app.config import settings
 
-            self._rag = RagService()
+            if settings.demo_offline_mode:
+                self._rag = _OfflineRagService()
+            else:
+                from app.services.rag_service import RagService
+
+                self._rag = RagService()
         return self._rag
 
     # ------------------------------------------------------------------
