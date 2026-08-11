@@ -80,6 +80,13 @@ def classify_intent(text: str) -> tuple[str, float]:
     return "human_handoff", 0.5
 
 
+class RuleBasedIntentClassifier:
+    """Default classifier used when no model-backed classifier is configured."""
+
+    def predict(self, text: str) -> tuple[str, float]:
+        return classify_intent(text)
+
+
 # ---------------------------------------------------------------------------
 # Local demo fallback services
 # ---------------------------------------------------------------------------
@@ -176,7 +183,10 @@ class ChatOrchestrator:
         self,
         graph_service=None,
         rag_service=None,
+        classifier=None,
     ) -> None:
+        self._classifier = classifier or RuleBasedIntentClassifier()
+
         # 惰性导入真实服务，避免测试环境依赖
         if graph_service is not None:
             self._graph = graph_service
@@ -231,7 +241,7 @@ class ChatOrchestrator:
         """
         完整编排：分类 → 路由 → 保存 → 返回 ChatResponse 字典。
         """
-        intent, confidence = classify_intent(message)
+        intent, confidence = self._classifier.predict(message)
         products = _extract_products(message)
 
         answer: str
