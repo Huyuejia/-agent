@@ -9,6 +9,7 @@ ChatOrchestrator：keyword 意图分类 + 路由 GraphService / RAGService / fal
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Optional
 
@@ -16,6 +17,8 @@ from sqlalchemy.orm import Session
 
 from app.models.conversation import Conversation, Message
 from app.schemas.conversation import MessageSource
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 虚构智家商品白名单
@@ -85,6 +88,24 @@ class RuleBasedIntentClassifier:
 
     def predict(self, text: str) -> tuple[str, float]:
         return classify_intent(text)
+
+
+class FallbackIntentClassifier:
+    """Uses a fallback classifier when the primary classifier raises."""
+
+    def __init__(self, primary, fallback=None) -> None:
+        self._primary = primary
+        self._fallback = fallback or RuleBasedIntentClassifier()
+
+    def predict(self, text: str) -> tuple[str, float]:
+        try:
+            return self._primary.predict(text)
+        except Exception:
+            logger.warning(
+                "Primary intent classifier failed; using fallback",
+                exc_info=True,
+            )
+            return self._fallback.predict(text)
 
 
 # ---------------------------------------------------------------------------

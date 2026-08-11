@@ -5,6 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import app.services.chat_orchestrator as orchestrator_module
 from app.services.chat_orchestrator import ChatOrchestrator
 
 
@@ -17,6 +18,13 @@ class FakeClassifier:
     def predict(self, text: str) -> tuple[str, float]:
         self.last_text = text
         return "complaint", 0.91
+
+
+class BrokenClassifier:
+    """Simulates a model runtime failure during inference."""
+
+    def predict(self, text: str) -> tuple[str, float]:
+        raise RuntimeError("model inference failed")
 
 
 class FakeDb:
@@ -50,3 +58,13 @@ def test_injected_classifier_controls_route():
     assert result["handoff_required"] is True
     assert len(db.items) == 2
     assert db.commit_count == 1
+
+
+def test_model_failure_falls_back_to_rules():
+    classifier = orchestrator_module.FallbackIntentClassifier(
+        primary=BrokenClassifier(),
+    )
+
+    intent, confidence = classifier.predict("我要退货")
+
+    assert (intent, confidence) == ("return_refund", 1.0)
