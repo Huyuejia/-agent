@@ -19,6 +19,7 @@ backend/data/chroma/
 backend/data/*.db
 
 # Training artifacts
+training/.cache/
 training/runs/
 training/reports/*
 !training/reports/.gitkeep
