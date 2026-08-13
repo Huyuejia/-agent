@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     demo_user_id: int = 1
     demo_offline_mode: bool = False
 
+    # Optional external intent-model service; rules remain the safe default.
+    intent_model_url: str | None = None
+    intent_model_timeout_seconds: float = 10.0
+
     # BGE-M3 local model
     bge_model_path: str = "./models/bge_m3"
     bge_model_name: str = "BAAI/bge-m3"

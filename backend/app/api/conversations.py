@@ -7,6 +7,7 @@ POST /api/chat               — 发送消息并获取回答
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models.conversation import Conversation, Message
 from app.schemas.conversation import (
@@ -14,7 +15,12 @@ from app.schemas.conversation import (
     ChatResponse,
     ConversationCreateResponse,
 )
-from app.services.chat_orchestrator import ChatOrchestrator
+from app.services.chat_orchestrator import (
+    ChatOrchestrator,
+    FallbackIntentClassifier,
+    RuleBasedIntentClassifier,
+)
+from app.services.intent_model_client import HttpIntentClassifier
 
 router = APIRouter(tags=["conversations"])
 
@@ -25,7 +31,17 @@ _orchestrator: ChatOrchestrator | None = None
 def _get_orchestrator() -> ChatOrchestrator:
     global _orchestrator
     if _orchestrator is None:
-        _orchestrator = ChatOrchestrator()
+        classifier = RuleBasedIntentClassifier()
+        if settings.intent_model_url:
+            model_classifier = HttpIntentClassifier(
+                base_url=settings.intent_model_url,
+                timeout_seconds=settings.intent_model_timeout_seconds,
+            )
+            classifier = FallbackIntentClassifier(
+                primary=model_classifier,
+                fallback=classifier,
+            )
+        _orchestrator = ChatOrchestrator(classifier=classifier)
     return _orchestrator
 
 
