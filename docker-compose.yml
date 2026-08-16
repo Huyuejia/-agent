@@ -42,6 +42,41 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+  intent-model:
+    build:
+      context: .
+      dockerfile: training/Dockerfile.intent
+    image: customer-intelligence-intent-onnx:local
+    container_name: ciw-intent-model
+    restart: unless-stopped
+    environment:
+      MODEL_RUNTIME: onnx
+      MODEL_ONNX_PATH: /models/intent
+      MODEL_ONNX_PROVIDER: CUDAExecutionProvider
+      MODEL_VERSION: intent-qwen2.5-1.5b-onnx-fp16-v1
+    ports:
+      - "${MODEL_PORT:-8001}:8001"
+    volumes:
+      - ${MODEL_ONNX_HOST_PATH:-./training/runs/qlora-20260627/deployment/onnx-fp16}:/models/intent:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready', timeout=3)"
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
+    stop_grace_period: 30s
+
 volumes:
   mysql-data:
   neo4j-data:
