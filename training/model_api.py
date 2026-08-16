@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from training.intent_classifier import ModelIntentClassifier
+from training.onnx_intent_classifier import OnnxIntentClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +40,33 @@ class ReadinessResponse(BaseModel):
     model_load_seconds: float
 
 
-def build_model_classifier() -> ModelIntentClassifier:
+def build_model_classifier() -> IntentClassifier:
     """Build the real classifier from environment-based configuration."""
-    return ModelIntentClassifier(
-        base_model=os.getenv(
-            "MODEL_BASE_NAME",
-            "Qwen/Qwen2.5-1.5B-Instruct",
-        ),
-        adapter_path=os.getenv(
-            "MODEL_ADAPTER_PATH",
-            "training/runs/qlora-20260627/checkpoints/lora-adapter/final",
-        ),
+    runtime = os.getenv("MODEL_RUNTIME", "pytorch").strip().lower()
+    if runtime == "onnx":
+        return OnnxIntentClassifier(
+            model_path=os.getenv(
+                "MODEL_ONNX_PATH",
+                "training/runs/qlora-20260627/deployment/onnx-fp16",
+            ),
+            provider=os.getenv(
+                "MODEL_ONNX_PROVIDER",
+                "CUDAExecutionProvider",
+            ),
+        )
+    if runtime == "pytorch":
+        return ModelIntentClassifier(
+            base_model=os.getenv(
+                "MODEL_BASE_NAME",
+                "Qwen/Qwen2.5-1.5B-Instruct",
+            ),
+            adapter_path=os.getenv(
+                "MODEL_ADAPTER_PATH",
+                "training/runs/qlora-20260627/checkpoints/lora-adapter/final",
+            ),
+        )
+    raise ValueError(
+        f"Unsupported MODEL_RUNTIME={runtime!r}; expected 'pytorch' or 'onnx'"
     )
 
 

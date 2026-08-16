@@ -4,6 +4,7 @@ from numbers import Real
 
 from fastapi.testclient import TestClient
 
+from training import model_api as model_api_module
 from training.model_api import create_app
 
 
@@ -14,6 +15,28 @@ class FakeClassifier:
     def predict(self, text: str) -> tuple[str, float]:
         self.received_texts.append(text)
         return "return_refund", 0.95
+
+
+def test_build_classifier_selects_onnx_from_environment(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    class FakeOnnxClassifier:
+        def __init__(self, model_path: str, provider: str) -> None:
+            calls.append((model_path, provider))
+
+    monkeypatch.setenv("MODEL_RUNTIME", "onnx")
+    monkeypatch.setenv("MODEL_ONNX_PATH", "local-onnx")
+    monkeypatch.setenv("MODEL_ONNX_PROVIDER", "CUDAExecutionProvider")
+    monkeypatch.setattr(
+        model_api_module,
+        "OnnxIntentClassifier",
+        FakeOnnxClassifier,
+    )
+
+    classifier = model_api_module.build_model_classifier()
+
+    assert isinstance(classifier, FakeOnnxClassifier)
+    assert calls == [("local-onnx", "CUDAExecutionProvider")]
 
 
 def test_health_is_a_liveness_endpoint():
