@@ -36,6 +36,8 @@ def test_http_classifier_calls_model_endpoint():
     result = classifier.predict("客服态度太差")
 
     assert result == ("complaint", 0.94)
-    assert captured["url"].endswith("/predict")
+    assert captured["url"] == (
+        "http://127.0.0.1:8001/v1/intent/predict"
+    )
     assert captured["body"] == {"text": "客服态度太差"}
     assert captured["timeout"] == 3.0

@@ -29,6 +29,14 @@ class PredictionResponse(BaseModel):
     intent: str
     confidence: float
     latency_ms: float
+    model_version: str
+
+
+class ReadinessResponse(BaseModel):
+    status: str
+    model_loaded: bool
+    model_version: str
+    model_load_seconds: float
 
 
 def build_model_classifier() -> ModelIntentClassifier:
@@ -54,33 +62,62 @@ def create_app(
     async def lifespan(application: FastAPI):
         started_at = time.perf_counter()
         factory = classifier_factory or build_model_classifier
-        logger.info("Loading intent classifier")
+        application.state.model_loaded = False
+        application.state.model_version = os.getenv(
+            "MODEL_VERSION",
+            "intent-qwen2.5-1.5b-qlora-v1",
+        )
+        logger.info(
+            "Loading intent classifier model_version=%s",
+            application.state.model_version,
+        )
         application.state.classifier = factory()
         application.state.model_load_seconds = round(
             time.perf_counter() - started_at,
             3,
         )
+        application.state.model_loaded = True
         logger.info(
-            "Intent classifier ready in %.3f seconds",
+            "Intent classifier ready model_version=%s load_seconds=%.3f",
+            application.state.model_version,
             application.state.model_load_seconds,
         )
         yield
 
     application = FastAPI(
         title="Intent Classification Service",
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
 
     @application.get("/health")
     def health() -> dict:
-        return {
-            "status": "ready",
-            "model_loaded": hasattr(application.state, "classifier"),
-            "model_load_seconds": application.state.model_load_seconds,
-        }
+        return {"status": "ok"}
 
-    @application.post("/predict", response_model=PredictionResponse)
+    @application.get("/ready", response_model=ReadinessResponse)
+    def ready() -> ReadinessResponse:
+        if not application.state.model_loaded:
+            raise HTTPException(
+                status_code=503,
+                detail="Model is not ready",
+            )
+
+        return ReadinessResponse(
+            status="ready",
+            model_loaded=True,
+            model_version=application.state.model_version,
+            model_load_seconds=application.state.model_load_seconds,
+        )
+
+    @application.post(
+        "/predict",
+        response_model=PredictionResponse,
+        include_in_schema=False,
+    )
+    @application.post(
+        "/v1/intent/predict",
+        response_model=PredictionResponse,
+    )
     def predict(payload: PredictionRequest) -> PredictionResponse:
         started_at = time.perf_counter()
         try:
@@ -96,7 +133,9 @@ def create_app(
 
         latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
         logger.info(
-            "Intent prediction completed intent=%s latency_ms=%.2f",
+            "Intent prediction completed model_version=%s "
+            "intent=%s latency_ms=%.2f",
+            application.state.model_version,
             intent,
             latency_ms,
         )
@@ -104,6 +143,7 @@ def create_app(
             intent=intent,
             confidence=confidence,
             latency_ms=latency_ms,
+            model_version=application.state.model_version,
         )
 
     return application

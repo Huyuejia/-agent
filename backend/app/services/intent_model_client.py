@@ -16,7 +16,7 @@ class HttpIntentClassifier:
         timeout_seconds: float = 10.0,
         open_url: Callable | None = None,
     ) -> None:
-        self._predict_url = f"{base_url.rstrip('/')}/predict"
+        self._predict_url = f"{base_url.rstrip('/')}/v1/intent/predict"
         self._timeout_seconds = timeout_seconds
         if open_url is None:
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
