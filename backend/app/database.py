@@ -58,15 +58,26 @@ def get_db() -> Session:
 
 
 def create_tables() -> None:
-    """根据所有模型声明创建表（幂等）。需要在初始化时调用一次。
-    MySQL 不可达时打印警告并跳过（测试可用 SQLite 替代）。"""
+    """根据模型声明创建表（幂等）。需要在初始化时调用一次。
+    MySQL 不可达时打印警告并跳过（测试可用 SQLite 替代）。
+
+    仅创建历史业务表（会话/消息/文档）；products/orders/order_items/devices/
+    error_codes 等 PostgreSQL 业务表由 Alembic 迁移管理，不在此处 create_all。
+    """
     import logging
 
-    from app.models.document import Base as DocBase  # noqa: F811
-    from app.models.conversation import Base as ConvBase  # noqa: F811
+    from app.models.base import Base
+    from app.models.conversation import Conversation, Message
+    from app.models.document import Document, DocumentIndex
+
+    legacy_tables = [
+        Conversation.__table__,
+        Message.__table__,
+        Document.__table__,
+        DocumentIndex.__table__,
+    ]
 
     try:
-        DocBase.metadata.create_all(bind=_get_engine())
-        ConvBase.metadata.create_all(bind=_get_engine())
+        Base.metadata.create_all(bind=_get_engine(), tables=legacy_tables)
     except Exception as exc:
         logging.warning("create_tables 跳过: MySQL 不可达 (%s)", exc)

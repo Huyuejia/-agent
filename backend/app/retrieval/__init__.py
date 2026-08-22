@@ -16,6 +16,8 @@ from app.retrieval.domain import (
     RetrievalPlan,
     RetrievalStep,
 )
+from app.retrieval.exact_repository import ExactRepository, ResolvedEntity
+from app.retrieval.exact_retriever import ExactRetriever
 from app.retrieval.query_analyzer import QueryAnalyzer
 from app.retrieval.retriever import Retriever
 
@@ -23,9 +25,12 @@ __all__ = [
     "Citation",
     "DetectedEntity",
     "Evidence",
+    "ExactRepository",
+    "ExactRetriever",
     "FusionStrategy",
     "MissPolicy",
     "QueryAnalyzer",
+    "ResolvedEntity",
     "RetrievalMode",
     "RetrievalPlan",
     "RetrievalStep",

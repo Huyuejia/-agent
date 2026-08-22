@@ -3,9 +3,8 @@ MySQL 模型: documents + document_indexes
 """
 
 from sqlalchemy import Column, Integer, String, DateTime, Text, func
-from sqlalchemy.orm import declarative_base
 
-Base = declarative_base()
+from app.models.base import Base
 
 
 class Document(Base):

@@ -76,11 +76,24 @@ def _has_anaphora(text: str) -> bool:
     return bool(_ANAPHORA_RE.search(text))
 
 
+def _dedupe_entities(entities: list[DetectedEntity]) -> list[DetectedEntity]:
+    """按 (type, normalized_value) 去重，保持首次出现顺序。"""
+    seen: set[tuple[str, str]] = set()
+    deduped: list[DetectedEntity] = []
+    for entity in entities:
+        key = (entity.type, entity.normalized_value)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(entity)
+    return deduped
+
+
 def _entity_filters(entities: list[DetectedEntity]) -> dict:
-    # 数据库查询使用标准化值
+    # 数据库查询使用标准化值；去重后保持稳定顺序
+    deduped = _dedupe_entities(entities)
     return {
-        "entity_types": [e.type for e in entities],
-        "entity_values": [e.normalized_value for e in entities],
+        "entity_types": [e.type for e in deduped],
+        "entity_values": [e.normalized_value for e in deduped],
     }
 
 
@@ -88,8 +101,9 @@ def _exact_step(
     step_id: str,
     query: str,
     entities: list[DetectedEntity],
-    top_k: int,
 ) -> RetrievalStep:
+    # top_k 至少等于去重后的显式标识符数量，不得固定为 1
+    top_k = max(1, len(_dedupe_entities(entities)))
     return RetrievalStep(
         step_id=step_id,
         mode=RetrievalMode.EXACT,
@@ -123,7 +137,7 @@ class QueryAnalyzer:
         # 显式唯一标识符 → EXACT，未命中 STOP，不语义降级
         if has_unique_id:
             return RetrievalPlan(
-                steps=[_exact_step("exact_lookup", text, entities, top_k=1)],
+                steps=[_exact_step("exact_lookup", text, entities)],
                 detected_entities=entities,
                 intent="exact_lookup",
                 confidence=1.0,
@@ -133,9 +147,7 @@ class QueryAnalyzer:
         # 关系问题
         if relation:
             if sku_entities:
-                resolve = _exact_step(
-                    "resolve_entities", text, sku_entities, top_k=len(sku_entities)
-                )
+                resolve = _exact_step("resolve_entities", text, sku_entities)
                 graph = RetrievalStep(
                     step_id="graph_lookup",
                     mode=RetrievalMode.GRAPH,
@@ -177,7 +189,7 @@ class QueryAnalyzer:
         # 单货号 → EXACT 商品主数据查询
         if sku_entities:
             return RetrievalPlan(
-                steps=[_exact_step("exact_lookup", text, sku_entities, top_k=1)],
+                steps=[_exact_step("exact_lookup", text, sku_entities)],
                 detected_entities=entities,
                 intent="exact_lookup",
                 confidence=1.0,

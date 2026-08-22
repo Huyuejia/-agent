@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     mysql_password: str = "demo_pass"
     mysql_database: str = "customer_workbench"
 
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_user: str = "postgres"
+    postgres_password: str = "postgres"
+    postgres_db: str = "customer_workbench"
+    postgres_url: str | None = None
+
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "demo123456"
@@ -42,6 +49,16 @@ class Settings(BaseSettings):
         if path.is_absolute():
             return str(path)
         return str((PROJECT_ROOT / path).resolve())
+
+    @property
+    def postgres_database_url(self) -> str:
+        """PostgreSQL DSN（psycopg3），优先取显式 URL，否则由分项拼装。"""
+        if self.postgres_url:
+            return self.postgres_url
+        return (
+            f"postgresql+psycopg://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
 
     # Resolve the environment file from the repository root instead of the
     # process working directory. This keeps configuration consistent whether

@@ -3,9 +3,8 @@ MySQL 模型: conversations + messages
 """
 
 from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, ForeignKey, func
-from sqlalchemy.orm import declarative_base, relationship
 
-Base = declarative_base()
+from app.models.base import Base
 
 
 class Conversation(Base):

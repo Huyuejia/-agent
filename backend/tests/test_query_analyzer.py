@@ -61,6 +61,25 @@ def test_mixed_case_sku_normalizes_but_keeps_raw():
     assert plan.steps[0].filters["entity_values"] == ["CAM-A1"]
 
 
+def test_multiple_identifiers_top_k_not_fixed_to_one():
+    plan = _analyze("订单 ORD-123456 里的 Cam-A1 多少钱")
+    assert plan.intent == "exact_lookup"
+    step = plan.steps[0]
+    assert step.mode is RetrievalMode.EXACT
+    # top_k 至少等于去重后的标识符数量（订单号 + SKU = 2）
+    assert step.top_k == 2
+    assert step.filters["entity_types"] == ["order", "sku"]
+    assert step.filters["entity_values"] == ["ORD123456", "CAM-A1"]
+
+
+def test_duplicate_identifiers_deduped_stable_order():
+    plan = _analyze("ORD-123456 订单 ORD-123456")
+    assert plan.intent == "exact_lookup"
+    step = plan.steps[0]
+    assert step.top_k == 1
+    assert step.filters["entity_values"] == ["ORD123456"]
+
+
 def test_compatibility_generates_exact_then_graph_with_dependency():
     plan = _analyze("Cam-A1 和 Hub-Z1 兼容吗")
     assert plan.intent == "graph_query"
