@@ -118,8 +118,10 @@ class FakeRAGService:
 @pytest.fixture(scope="module")
 def client():
     """创建 TestClient，注入 fake GraphService / RAGService + 内存 SQLite。"""
-    from app.main import app
+    from app.main import create_app
     from app.services.chat_orchestrator import ChatOrchestrator
+
+    app = create_app(initialize_database=False)
 
     # 内存 SQLite
     test_engine = create_engine(

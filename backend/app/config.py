@@ -1,4 +1,11 @@
-from pydantic_settings import BaseSettings
+from pathlib import Path
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_ENV_FILE = PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
@@ -28,7 +35,22 @@ class Settings(BaseSettings):
     bge_model_name: str = "BAAI/bge-m3"
     bge_local_files_only: bool = True
 
-    model_config = {"env_file": ".env", "extra": "ignore"}
+    @field_validator("chroma_persist_dir", "bge_model_path")
+    @classmethod
+    def resolve_project_path(cls, value: str) -> str:
+        path = Path(value)
+        if path.is_absolute():
+            return str(path)
+        return str((PROJECT_ROOT / path).resolve())
+
+    # Resolve the environment file from the repository root instead of the
+    # process working directory. This keeps configuration consistent whether
+    # uvicorn starts from the repository root or from backend/.
+    model_config = SettingsConfigDict(
+        env_file=DEFAULT_ENV_FILE,
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()

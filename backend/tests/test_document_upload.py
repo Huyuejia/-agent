@@ -83,8 +83,10 @@ def _make_test_docx(text: str) -> io.BytesIO:
 @pytest.fixture(scope="module")
 def client() -> TestClient:
     """创建 TestClient，注入 fake embedding 的 RagService。"""
-    from app.main import app
+    from app.main import create_app
     from app.services.rag_service import RagService
+
+    app = create_app(initialize_database=False)
 
     # 用临时目录做 Chroma 持久化
     tmpdir = tempfile.mkdtemp(prefix="chroma_test_")
@@ -110,7 +112,7 @@ def client() -> TestClient:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    # 在 SQLite 里建表（MySQL create_tables 在 lifespan 中因无 MySQL 而跳过）
+    # 在内存 SQLite 里建表（测试应用用 initialize_database=False，lifespan 不建表）
     Base.metadata.create_all(bind=test_engine)
     TestingSessionLocal = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
 
