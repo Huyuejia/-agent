@@ -41,7 +41,15 @@ def _get_orchestrator() -> ChatOrchestrator:
                 primary=model_classifier,
                 fallback=classifier,
             )
-        _orchestrator = ChatOrchestrator(classifier=classifier)
+        retrieval_service = None
+        if not settings.demo_offline_mode:
+            from app.services.retrieval_chat import create_retrieval_chat_service
+
+            retrieval_service = create_retrieval_chat_service()
+        _orchestrator = ChatOrchestrator(
+            classifier=classifier,
+            retrieval_service=retrieval_service,
+        )
     return _orchestrator
 
 

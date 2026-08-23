@@ -205,8 +205,10 @@ class ChatOrchestrator:
         graph_service=None,
         rag_service=None,
         classifier=None,
+        retrieval_service=None,
     ) -> None:
         self._classifier = classifier or RuleBasedIntentClassifier()
+        self._retrieval_service = retrieval_service
 
         # 惰性导入真实服务，避免测试环境依赖
         if graph_service is not None:
@@ -262,6 +264,44 @@ class ChatOrchestrator:
         """
         完整编排：分类 → 路由 → 保存 → 返回 ChatResponse 字典。
         """
+        if self._retrieval_service is not None:
+            try:
+                result = self._retrieval_service.answer(message)
+            except Exception:
+                logger.exception("Unified retrieval pipeline failed")
+                result = {
+                    "answer": (
+                        "检索服务暂时不可用。为避免给出未经证据支持的答案，"
+                        "建议稍后重试或联系人工客服。"
+                    ),
+                    "intent": "retrieval_error",
+                    "confidence": 0.0,
+                    "source_type": "fallback",
+                    "sources": [],
+                    "handoff_required": True,
+                }
+
+            self._save_messages(
+                db,
+                conversation_id=conversation_id,
+                user_text=message,
+                assistant_text=result["answer"],
+                intent=result["intent"],
+                confidence=int(result["confidence"] * 100),
+                source_type=result["source_type"],
+                sources=result["sources"],
+                handoff_required=result["handoff_required"],
+            )
+            return {
+                "conversation_id": conversation_id,
+                "answer": result["answer"],
+                "intent": result["intent"],
+                "confidence": result["confidence"],
+                "source_type": result["source_type"],
+                "sources": result["sources"],
+                "handoff_required": result["handoff_required"],
+            }
+
         intent, confidence = self._classifier.predict(message)
         products = _extract_products(message)
 

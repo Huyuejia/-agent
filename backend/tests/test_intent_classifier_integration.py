@@ -68,3 +68,54 @@ def test_model_failure_falls_back_to_rules():
     intent, confidence = classifier.predict("我要退货")
 
     assert (intent, confidence) == ("return_refund", 1.0)
+
+class FakeRetrievalService:
+    def __init__(self, error=None):
+        self.error = error
+        self.queries = []
+
+    def answer(self, query):
+        self.queries.append(query)
+        if self.error:
+            raise self.error
+        return {
+            "answer": "精确命中 Cam-A1",
+            "intent": "exact_lookup",
+            "confidence": 1.0,
+            "source_type": "exact",
+            "sources": [],
+            "handoff_required": False,
+        }
+
+
+def test_unified_retrieval_service_bypasses_legacy_classifier_and_persists():
+    service = FakeRetrievalService()
+    db = FakeDb()
+    orchestrator = ChatOrchestrator(
+        classifier=BrokenClassifier(),
+        retrieval_service=service,
+    )
+
+    result = orchestrator.route("Cam-A1", conversation_id=7, db=db)
+
+    assert service.queries == ["Cam-A1"]
+    assert result["conversation_id"] == 7
+    assert result["intent"] == "exact_lookup"
+    assert result["answer"] == "精确命中 Cam-A1"
+    assert len(db.items) == 2
+    assert db.commit_count == 1
+
+
+def test_unified_retrieval_failure_returns_evidence_safe_fallback():
+    db = FakeDb()
+    orchestrator = ChatOrchestrator(
+        retrieval_service=FakeRetrievalService(RuntimeError("postgres down")),
+    )
+
+    result = orchestrator.route("ORD123456", conversation_id=8, db=db)
+
+    assert result["intent"] == "retrieval_error"
+    assert result["source_type"] == "fallback"
+    assert result["handoff_required"] is True
+    assert "未经证据支持" in result["answer"]
+    assert db.commit_count == 1

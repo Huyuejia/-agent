@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     intent_model_url: str | None = None
     intent_model_timeout_seconds: float = 10.0
 
+    # Optional OpenAI-compatible LLM; retrieval works without it.
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str = "qwen-plus"
+    llm_timeout_seconds: float = 30.0
+    llm_temperature: float = 0.2
+    llm_max_tokens: int = 512
+
     # BGE-M3 local model
     bge_model_path: str = "./models/bge_m3"
     bge_model_name: str = "BAAI/bge-m3"
