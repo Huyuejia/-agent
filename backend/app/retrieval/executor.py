@@ -200,8 +200,23 @@ class RetrievalExecutor:
             dict.fromkeys(entity_id for item in evidence for entity_id in item.entity_ids)
         )
         filters = dict(step.filters)
+        resolved_entities = []
+        for item in evidence:
+            payload = item.citation.payload
+            identifier = payload.get("identifier")
+            table = payload.get("table")
+            record_id = payload.get("record_id")
+            if identifier and table:
+                resolved_entities.append(
+                    {
+                        "identifier": identifier,
+                        "table": table,
+                        "record_id": str(record_id or ""),
+                    }
+                )
         filters["dependency_evidence_ids"] = evidence_ids
         filters["resolved_entity_ids"] = entity_ids
+        filters["resolved_entities"] = resolved_entities
         return step.model_copy(update={"filters": filters})
 
     @staticmethod

@@ -70,6 +70,20 @@ def test_plug_p1_not_compatible_with_lock_d1(graph_service):
     )
 
 
+def test_get_compatible_products_cam_a1(graph_service):
+    assert graph_service.get_compatible_products("Cam-A1") == ["Hub-Z1"]
+
+
+def test_get_compatible_products_hub_z1(graph_service):
+    assert graph_service.get_compatible_products("Hub-Z1") == [
+        "Cam-A1",
+        "Light-B1",
+        "Lock-D1",
+        "Plug-P1",
+        "Sensor-T1",
+    ]
+
+
 # ---------------------------------------------------------------------------
 # 测试 3: 协议查询
 # ---------------------------------------------------------------------------
@@ -182,6 +196,10 @@ def test_unknown_product_never_reaches_session_run():
 
     with pytest.raises(ValueError, match="未识别的商品"):
         gs.get_warranty("cam-a1")
+    mock_driver.session.assert_not_called()
+
+    with pytest.raises(ValueError, match="未识别的商品"):
+        gs.get_compatible_products("Fake-X9")
     mock_driver.session.assert_not_called()
 
 

@@ -153,9 +153,21 @@ def test_fallback_miss_returns_fallback_status():
 
 
 def test_dependencies_are_topologically_ordered_and_entity_ids_are_forwarded():
-    exact = FakeRetriever(
-        [_evidence("product:row", RetrievalMode.EXACT, entity_ids=["uuid-1"])]
+    resolved = _evidence(
+        "product:row", RetrievalMode.EXACT, entity_ids=["uuid-1"]
+    ).model_copy(
+        update={
+            "citation": Citation(
+                source_type="products",
+                payload={
+                    "table": "products",
+                    "record_id": "uuid-1",
+                    "identifier": "Cam-A1",
+                },
+            )
+        }
     )
+    exact = FakeRetriever([resolved])
     graph = FakeRetriever([_evidence("graph:1", RetrievalMode.GRAPH)])
     plan = RetrievalPlan(
         steps=[
@@ -172,6 +184,9 @@ def test_dependencies_are_topologically_ordered_and_entity_ids_are_forwarded():
     graph_step = graph.calls[0][1]
     assert graph_step.filters["resolved_entity_ids"] == ["uuid-1"]
     assert graph_step.filters["dependency_evidence_ids"] == ["product:row"]
+    assert graph_step.filters["resolved_entities"] == [
+        {"identifier": "Cam-A1", "table": "products", "record_id": "uuid-1"}
+    ]
 
 
 def test_missing_dependency_result_skips_dependent_step_and_stops_if_required():

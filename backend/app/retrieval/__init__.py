@@ -21,6 +21,7 @@ from app.retrieval.domain import (
 )
 from app.retrieval.exact_repository import ExactRepository, ResolvedEntity
 from app.retrieval.exact_retriever import ExactRetriever
+from app.retrieval.graph_retriever import GraphQueryService, GraphRetriever
 from app.retrieval.executor import (
     ExecutionStatus,
     RetrievalExecutionError,
@@ -46,6 +47,8 @@ __all__ = [
     "ExactRetriever",
     "ExecutionStatus",
     "FusionStrategy",
+    "GraphQueryService",
+    "GraphRetriever",
     "HybridRetriever",
     "JiebaTokenizer",
     "LexicalMatch",
