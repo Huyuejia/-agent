@@ -21,6 +21,7 @@ from app.models import (  # noqa: F401
     conversation,
     device,
     document,
+    document_chunk,
     error_code,
     order,
     product,
@@ -35,6 +36,10 @@ target_metadata = Base.metadata
 
 
 def _database_url() -> str:
+    # 允许外部（如集成测试）通过 config 显式覆盖 URL；否则回落到 settings。
+    explicit = config.get_main_option("sqlalchemy.url")
+    if explicit:
+        return explicit
     return settings.postgres_database_url
 
 

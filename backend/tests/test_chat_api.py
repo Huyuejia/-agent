@@ -129,8 +129,20 @@ def client():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    DocBase.metadata.create_all(bind=test_engine)
-    ConvBase.metadata.create_all(bind=test_engine)
+    # 用 tables= 限制建表范围，避免共享 Base.metadata 里其它 PostgreSQL 专有表
+    # （如 document_chunks）污染 SQLite 建表（CompileError）。
+    from app.models.document import Document, DocumentIndex
+    from app.models.conversation import Conversation, Message
+
+    DocBase.metadata.create_all(
+        bind=test_engine,
+        tables=[
+            Document.__table__,
+            DocumentIndex.__table__,
+            Conversation.__table__,
+            Message.__table__,
+        ],
+    )
     TestingSessionLocal = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
 
     def override_get_db():

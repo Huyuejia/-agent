@@ -103,7 +103,7 @@ def client() -> TestClient:
     from sqlalchemy.orm import sessionmaker
 
     from app.database import get_db
-    from app.models.document import Base
+    from app.models.document import Base, Document, DocumentIndex
 
     from sqlalchemy.pool import StaticPool
 
@@ -112,8 +112,13 @@ def client() -> TestClient:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    # 在内存 SQLite 里建表（测试应用用 initialize_database=False，lifespan 不建表）
-    Base.metadata.create_all(bind=test_engine)
+    # 在内存 SQLite 里只建本测试用到的两张表（测试应用 initialize_database=False，
+    # lifespan 不建表）。用 tables= 限制，避免共享 Base.metadata 里其它
+    # PostgreSQL 专有表（如 document_chunks）污染 SQLite 建表。
+    Base.metadata.create_all(
+        bind=test_engine,
+        tables=[Document.__table__, DocumentIndex.__table__],
+    )
     TestingSessionLocal = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
 
     def override_get_db():

@@ -4,6 +4,8 @@
   Evidence / RetrievalStep / RetrievalPlan
 - retriever: Retriever Protocol
 - query_analyzer: 确定性 QueryAnalyzer
+- tokenizer: Tokenizer Protocol + JiebaTokenizer
+- lexical_retriever / vector_retriever: 词法 / 向量检索器
 """
 
 from app.retrieval.domain import (
@@ -18,8 +20,13 @@ from app.retrieval.domain import (
 )
 from app.retrieval.exact_repository import ExactRepository, ResolvedEntity
 from app.retrieval.exact_retriever import ExactRetriever
+from app.retrieval.lexical_repository import LexicalMatch, LexicalRepository
+from app.retrieval.lexical_retriever import LexicalRetriever
 from app.retrieval.query_analyzer import QueryAnalyzer
 from app.retrieval.retriever import Retriever
+from app.retrieval.tokenizer import JiebaTokenizer, Tokenizer
+from app.retrieval.vector_repository import VectorMatch, VectorRepository
+from app.retrieval.vector_retriever import PgVectorRetriever
 
 __all__ = [
     "Citation",
@@ -28,11 +35,19 @@ __all__ = [
     "ExactRepository",
     "ExactRetriever",
     "FusionStrategy",
+    "JiebaTokenizer",
+    "LexicalMatch",
+    "LexicalRepository",
+    "LexicalRetriever",
     "MissPolicy",
+    "PgVectorRetriever",
     "QueryAnalyzer",
     "ResolvedEntity",
     "RetrievalMode",
     "RetrievalPlan",
     "RetrievalStep",
     "Retriever",
+    "Tokenizer",
+    "VectorMatch",
+    "VectorRepository",
 ]
