@@ -15,6 +15,7 @@ import chromadb
 from chromadb.api.types import EmbeddingFunction as ChromaEmbedFn
 
 from app.config import settings
+from app.embeddings import create_bge_m3_embedder
 
 # ---------------------------------------------------------------------------
 # 类型
@@ -27,48 +28,9 @@ EmbedFn = Callable[[list[str]], list[list[float]]]
 # 真实的 BGE-M3 加载
 # ---------------------------------------------------------------------------
 def _load_bge_m3_embedder() -> tuple[EmbedFn, int]:
-    """
-    从本地路径加载 BGE-M3。
-    返回 (embed 函数, 向量维度)。
-    失败时抛出 RuntimeError，绝不联网。
-    """
-    model_path = settings.bge_model_path
-    model_name = settings.bge_model_name
-
-    # 1. 检查路径是否存在
-    if not os.path.isdir(model_path):
-        raise RuntimeError(
-            f"BGE 模型路径不存在: {model_path}\n"
-            f"请确认 BGE-M3 模型已下载到该目录。\n"
-            f"可复现命令:\n"
-            f"  git lfs install\n"
-            f"  git clone https://huggingface.co/{model_name} \"{model_path}\"\n"
-            f"或从镜像站下载后放置到该路径。"
-        )
-
-    # 2. 加载（显式禁止联网）
-    try:
-        from sentence_transformers import SentenceTransformer
-
-        model = SentenceTransformer(
-            model_path,
-            local_files_only=settings.bge_local_files_only,
-            trust_remote_code=False,
-        )
-    except Exception as e:
-        raise RuntimeError(
-            f"加载 BGE-M3 模型失败: {model_path}\n"
-            f"错误详情: {e}\n"
-            f"请确认模型文件完整（需包含 model.safetensors / config.json / tokenizer.json 等）。"
-        ) from e
-
-    dim = model.get_sentence_embedding_dimension()
-
-    def _embed(texts: list[str]) -> list[list[float]]:
-        vectors = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
-        return vectors.tolist()
-
-    return _embed, dim
+    """创建共享契约的懒加载 Embedder；此调用本身不加载模型权重。"""
+    embedder = create_bge_m3_embedder()
+    return embedder.embed, embedder.dimension
 
 
 # ---------------------------------------------------------------------------

@@ -87,6 +87,18 @@ def client() -> TestClient:
     from app.services.rag_service import RagService
 
     app = create_app(initialize_database=False)
+    from app.dependencies.retrieval import get_document_indexing_service
+
+    class FakeDocumentIndexingService:
+        def __init__(self):
+            self.calls = []
+
+        def index_document(self, document, chunks):
+            self.calls.append((document, list(chunks)))
+
+    fake_indexing = FakeDocumentIndexingService()
+    app.state.fake_document_indexing = fake_indexing
+    app.dependency_overrides[get_document_indexing_service] = lambda: fake_indexing
 
     # 用临时目录做 Chroma 持久化
     tmpdir = tempfile.mkdtemp(prefix="chroma_test_")
@@ -231,7 +243,7 @@ class TestPdfUploadAndSearch:
         )
         return resp
 
-    def test_upload_pdf_success(self, upload_result):
+    def test_upload_pdf_success(self, upload_result, client):
         """PDF 上传应返回 201 且包含 chunk_count。"""
         assert upload_result.status_code == 201, upload_result.text
         data = upload_result.json()
@@ -239,6 +251,11 @@ class TestPdfUploadAndSearch:
         assert data["file_type"] == "pdf"
         assert data["chunk_count"] > 0
         assert data["document_id"] > 0
+        calls = client.app.state.fake_document_indexing.calls
+        assert len(calls) >= 1
+        indexed_document, indexed_chunks = calls[0]
+        assert indexed_document.document_id == data["document_id"]
+        assert len(indexed_chunks) == data["chunk_count"]
 
     def test_chunks_have_multiple(self, upload_result):
         """长文本应产生多个 chunk。"""

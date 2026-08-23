@@ -48,6 +48,11 @@ def _get_sessionmaker() -> sessionmaker:
     return _SessionLocal
 
 
+def get_session_factory() -> sessionmaker:
+    """供 CLI/后台任务显式创建历史数据库会话。"""
+    return _get_sessionmaker()
+
+
 def get_db() -> Session:
     """FastAPI 依赖：每个请求一个 session。"""
     db = _get_sessionmaker()()

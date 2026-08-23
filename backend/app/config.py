@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # BGE-M3 local model
     bge_model_path: str = "./models/bge_m3"
     bge_model_name: str = "BAAI/bge-m3"
+    bge_model_version: str = "local-v1"
+    bge_embedding_dimension: int = 1024
+    bge_device: str = "auto"
+    bge_batch_size: int = 4
     bge_local_files_only: bool = True
 
     @field_validator("chroma_persist_dir", "bge_model_path")
