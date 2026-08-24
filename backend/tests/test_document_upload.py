@@ -8,7 +8,6 @@
 import io
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -78,76 +77,91 @@ def _make_test_docx(text: str) -> io.BytesIO:
 
 
 # ---------------------------------------------------------------------------
-# TestClient + fake RagService
+# TestClient + fake PostgreSQL indexing/search services
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def client() -> TestClient:
-    """创建 TestClient，注入 fake embedding 的 RagService。"""
+    """用 SQLite 元数据表与内存 fake 隔离真实 PostgreSQL/GPU。"""
+    from app.dependencies.retrieval import (
+        get_document_indexing_service,
+        get_document_search_service,
+    )
     from app.main import create_app
-    from app.services.rag_service import RagService
+    from app.postgres_database import get_postgres_db
 
     app = create_app(initialize_database=False)
-    from app.dependencies.retrieval import get_document_indexing_service
+
+    class FakeDocumentSearchService:
+        def __init__(self):
+            self.chunks = []
+
+        def search(self, query, top_k=4):
+            ordered = sorted(
+                self.chunks,
+                key=lambda item: query not in item.content,
+            )[:top_k]
+            sources = [
+                {
+                    "document_name": item.metadata["document_name"],
+                    "location": item.location,
+                    "snippet": item.content[:200],
+                }
+                for item in ordered
+            ]
+            return {
+                "query": query,
+                "answer": "未命中" if not sources else sources[0]["snippet"],
+                "source_type": "document_rag",
+                "sources": sources,
+                "chunk_count": len(sources),
+            }
 
     class FakeDocumentIndexingService:
-        def __init__(self):
+        def __init__(self, search_service):
             self.calls = []
+            self._search = search_service
 
         def index_document(self, document, chunks):
-            self.calls.append((document, list(chunks)))
+            copied = list(chunks)
+            self.calls.append((document, copied))
+            self._search.chunks.extend(copied)
 
-    fake_indexing = FakeDocumentIndexingService()
+    fake_search = FakeDocumentSearchService()
+    fake_indexing = FakeDocumentIndexingService(fake_search)
     app.state.fake_document_indexing = fake_indexing
     app.dependency_overrides[get_document_indexing_service] = lambda: fake_indexing
+    app.dependency_overrides[get_document_search_service] = lambda: fake_search
 
-    # 用临时目录做 Chroma 持久化
-    tmpdir = tempfile.mkdtemp(prefix="chroma_test_")
-    fake_rag = RagService(embed_fn=_fake_embed_fn, embed_dim=EMBED_DIM, persist_dir=tmpdir)
-
-    # 注入 fake rag_service（惰性 getter 会在首次调用时发现已设置）
-    import app.api.documents as doc_mod
-
-    doc_mod._rag_service = fake_rag
-
-    # 建表（使用测试数据库或跳过）
-    # 这里只测业务逻辑链，不连真实 MySQL — 用内存 SQLite 替代
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-
-    from app.database import get_db
-    from app.models.document import Base, Document, DocumentIndex
-
     from sqlalchemy.pool import StaticPool
+
+    from app.models.base import Base
+    from app.models.document import Document
 
     test_engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    # 在内存 SQLite 里只建本测试用到的两张表（测试应用 initialize_database=False，
-    # lifespan 不建表）。用 tables= 限制，避免共享 Base.metadata 里其它
-    # PostgreSQL 专有表（如 document_chunks）污染 SQLite 建表。
-    Base.metadata.create_all(
-        bind=test_engine,
-        tables=[Document.__table__, DocumentIndex.__table__],
+    Base.metadata.create_all(bind=test_engine, tables=[Document.__table__])
+    TestingSessionLocal = sessionmaker(
+        bind=test_engine, autocommit=False, autoflush=False
     )
-    TestingSessionLocal = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
 
-    def override_get_db():
+    def override_postgres_db():
         db = TestingSessionLocal()
         try:
             yield db
         finally:
             db.close()
 
-    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_postgres_db] = override_postgres_db
 
     with TestClient(app) as tc:
         yield tc
 
     app.dependency_overrides.clear()
-    # 恢复 rag_service 为 None，避免测试副作用残留
-    doc_mod._rag_service = None
 
 
 # ===================================================================

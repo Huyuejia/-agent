@@ -10,7 +10,7 @@ def create_app(initialize_database: bool = True) -> FastAPI:
     """构建 FastAPI 应用。
 
     initialize_database=False 时，lifespan 不调用 create_tables()，
-    供测试使用内存 SQLite / Fake 服务，避免连接真实 MySQL。
+    供测试使用内存 SQLite / Fake 服务，避免连接真实 PostgreSQL。
     """
 
     @asynccontextmanager

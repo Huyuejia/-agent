@@ -1,7 +1,7 @@
 """ExactRetriever：精确检索器，实现 Retriever 协议。
 
 只做数据库等值查询，未命中返回空列表（由未来执行器按 MissPolicy.STOP 处理）。
-不调用 Chroma / pgvector / Neo4j / LLM；不对未命中的货号做模糊 / LIKE /
+不调用 pgvector / Neo4j / LLM；不对未命中的货号做模糊 / LIKE /
 全文 / 向量查询。
 """
 

@@ -24,13 +24,9 @@ def test_default_env_file_is_independent_of_working_directory(
 def test_relative_data_paths_are_resolved_from_repository_root() -> None:
     configured = Settings(
         _env_file=None,
-        chroma_persist_dir="./backend/data/chroma",
         bge_model_path="./models/bge_m3",
     )
 
-    assert Path(configured.chroma_persist_dir) == (
-        PROJECT_ROOT / "backend/data/chroma"
-    )
     assert Path(configured.bge_model_path) == (
         PROJECT_ROOT / "models/bge_m3"
     )

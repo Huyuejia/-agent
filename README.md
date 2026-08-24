@@ -10,8 +10,8 @@
 | API | FastAPI + Pydantic + SQLAlchemy |
 | 微调 | Qwen2.5-1.5B-Instruct + QLoRA (PEFT + bitsandbytes) |
 | 图谱 | Neo4j 5 |
-| 文档 RAG | Chroma + BAAI/bge-m3（设计默认 bge-small-zh-v1.5；本机通过 BGE_MODEL_PATH 使用本地 BGE-M3，模型文件不入仓库） |
-| 关系库 | MySQL 8 |
+| 文档 RAG | PostgreSQL FTS + pgvector + RRF + 本地 BGE-M3（GPU） |
+| 关系库 | PostgreSQL 16（业务数据、会话、文档与向量统一存储） |
 
 ## 快速启动
 
@@ -27,13 +27,13 @@ cp .env.example .env
 ### 2. 启动数据库
 
 ```bash
-docker-compose up -d
+docker compose up -d postgres neo4j
 ```
 
 等待健康检查通过：
 
 ```bash
-docker-compose ps
+docker compose ps
 ```
 
 ### 3. 启动后端
@@ -43,6 +43,9 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+alembic upgrade head
+python -m app.seed
+python -m app.seed_demo_knowledge
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -62,9 +65,8 @@ customer-intelligence-workbench/
 │   ├── app/
 │   │   ├── api/      API 路由
 │   │   ├── models/   SQLAlchemy 模型
-│   │   ├── services/ 业务服务（分类器、图谱、RAG、编排）
+│   │   ├── services/ 业务服务（分类器、图谱、混合检索、编排）
 │   │   └── schemas/  Pydantic 请求/响应模型
-│   ├── data/         持久化数据（Chroma）
 │   └── tests/        后端测试
 ├── frontend/         React 工作台
 │   └── src/

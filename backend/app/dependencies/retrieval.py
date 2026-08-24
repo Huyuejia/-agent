@@ -13,6 +13,7 @@ from app.indexing.service import TransactionalDocumentIndexingService
 from app.postgres_database import get_postgres_db
 from app.repositories.document_index import SQLAlchemyDocumentIndexWriter
 from app.retrieval import JiebaTokenizer
+from app.services.document_search import PostgresDocumentSearchService
 
 
 @lru_cache(maxsize=1)
@@ -31,3 +32,13 @@ def get_document_indexing_service(
     writer = SQLAlchemyDocumentIndexWriter(db, get_retrieval_tokenizer())
     indexer = DocumentIndexer(get_bge_m3_embedder(), writer)
     return TransactionalDocumentIndexingService(db, indexer)
+
+
+def get_document_search_service(
+    db: Session = Depends(get_postgres_db),
+) -> PostgresDocumentSearchService:
+    return PostgresDocumentSearchService(
+        db,
+        get_bge_m3_embedder(),
+        get_retrieval_tokenizer(),
+    )

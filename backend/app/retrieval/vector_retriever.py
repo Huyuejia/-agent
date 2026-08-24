@@ -4,7 +4,7 @@
 查询向量必须为固定维数（默认 1024），维度错误明确失败；输出必须恰好一个向量
 且元素为有限数值。空查询直接返回 []，不调用 embedding 服务。
 构造时显式声明 embedding_model / embedding_version，检索时只匹配同模型同版本。
-使用 cosine distance 精确排序。不调用词法 / Neo4j / Chroma / LLM。
+使用 cosine distance 精确排序。不调用词法 / Neo4j / LLM。
 """
 
 from __future__ import annotations

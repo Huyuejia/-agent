@@ -1,4 +1,4 @@
-"""PostgreSQL/pgvector 会话依赖，与历史 MySQL 会话明确分离。"""
+"""PostgreSQL/pgvector 统一会话依赖。"""
 
 from __future__ import annotations
 

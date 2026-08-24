@@ -1,6 +1,4 @@
-"""
-MySQL 模型: conversations + messages
-"""
+"""PostgreSQL 会话与消息模型。"""
 
 from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, ForeignKey, func
 

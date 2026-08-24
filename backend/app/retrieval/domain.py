@@ -17,7 +17,7 @@ class RetrievalMode(str, Enum):
     EXACT = "exact"       # 数据库等值查询（货号/订单号/序列号/错误码）
     GRAPH = "graph"       # Neo4j 关系与多跳查询
     LEXICAL = "lexical"   # 全文关键词检索（BM25/FTS）
-    VECTOR = "vector"     # Embedding 语义检索（pgvector/Chroma）
+    VECTOR = "vector"     # Embedding 语义检索（pgvector）
     HYBRID = "hybrid"     # 词法 + 向量 RRF 融合后的证据
 
 

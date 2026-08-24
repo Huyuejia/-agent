@@ -1,7 +1,7 @@
 """SQLAlchemyVectorRepository：基于 pgvector 的向量检索。
 
 使用 cosine distance（<=>）精确排序，只检索 embedding 非空的 chunk。
-不调用词法 / Neo4j / Chroma / LLM。
+不调用词法 / Neo4j / LLM。
 """
 
 from __future__ import annotations

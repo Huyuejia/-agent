@@ -247,9 +247,9 @@ class ChatOrchestrator:
             if settings.demo_offline_mode:
                 self._rag = _OfflineRagService()
             else:
-                from app.services.rag_service import RagService
-
-                self._rag = RagService()
+                raise RuntimeError(
+                    "生产文档检索已迁移到 PostgreSQL；请注入统一 retrieval_service"
+                )
         return self._rag
 
     # ------------------------------------------------------------------

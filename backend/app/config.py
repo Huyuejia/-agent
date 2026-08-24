@@ -9,14 +9,6 @@ DEFAULT_ENV_FILE = PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
-    database_url: str | None = None
-
-    mysql_host: str = "localhost"
-    mysql_port: int = 3306
-    mysql_user: str = "demo_user"
-    mysql_password: str = "demo_pass"
-    mysql_database: str = "customer_workbench"
-
     postgres_host: str = "localhost"
     postgres_port: int = 5432
     postgres_user: str = "postgres"
@@ -27,8 +19,6 @@ class Settings(BaseSettings):
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "demo123456"
-
-    chroma_persist_dir: str = "./backend/data/chroma"
 
     demo_user_id: int = 1
     demo_offline_mode: bool = False
@@ -54,7 +44,7 @@ class Settings(BaseSettings):
     bge_batch_size: int = 4
     bge_local_files_only: bool = True
 
-    @field_validator("chroma_persist_dir", "bge_model_path")
+    @field_validator("bge_model_path")
     @classmethod
     def resolve_project_path(cls, value: str) -> str:
         path = Path(value)

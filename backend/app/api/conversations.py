@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database import get_db
+from app.postgres_database import get_postgres_db
 from app.models.conversation import Conversation, Message
 from app.schemas.conversation import (
     ChatRequest,
@@ -63,7 +63,7 @@ def _get_orchestrator() -> ChatOrchestrator:
 )
 def create_conversation(
     title: str = "新会话",
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_postgres_db),
 ):
     """创建新会话。"""
     conv = Conversation(title=title[:255])
@@ -83,7 +83,7 @@ def create_conversation(
 @router.post("/api/chat", response_model=ChatResponse)
 def chat(
     payload: ChatRequest,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_postgres_db),
 ):
     """发送消息，获取意图、来源引用和回答。"""
     # 1. 校验会话存在

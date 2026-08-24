@@ -2,7 +2,7 @@
 会话与聊天编排集成测试。
 
 - GraphService 用 fake/mock，不依赖 Neo4j
-- RAGService 用 fake，不依赖 Chroma/BGE-M3
+- 旧编排降级用 fake，不依赖真实检索后端
 - 数据库用内存 SQLite
 - 不调 Qwen API、不加载模型
 """
@@ -87,7 +87,7 @@ class FakeGraphService:
 # Fake RAGService
 # ===================================================================
 class FakeRAGService:
-    """返回固定结果的虚拟 RAG 服务，不依赖 Chroma。"""
+    """返回固定结果的虚拟文档结果，不依赖真实检索后端。"""
 
     def search(self, query: str, top_k: int = 3) -> dict:
         snippet = (
@@ -131,14 +131,11 @@ def client():
     )
     # 用 tables= 限制建表范围，避免共享 Base.metadata 里其它 PostgreSQL 专有表
     # （如 document_chunks）污染 SQLite 建表（CompileError）。
-    from app.models.document import Document, DocumentIndex
     from app.models.conversation import Conversation, Message
 
     DocBase.metadata.create_all(
         bind=test_engine,
         tables=[
-            Document.__table__,
-            DocumentIndex.__table__,
             Conversation.__table__,
             Message.__table__,
         ],
