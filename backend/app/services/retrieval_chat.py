@@ -13,6 +13,7 @@ from app.repositories.exact import SQLAlchemyExactRepository
 from app.repositories.lexical import SQLAlchemyLexicalRepository
 from app.repositories.vector import SQLAlchemyVectorRepository
 from app.retrieval.domain import Evidence, FusionStrategy, RetrievalMode, RetrievalPlan
+from app.retrieval.exact_repository import ExactRepository
 from app.retrieval.exact_retriever import ExactRetriever
 from app.retrieval.executor import (
     ExecutionStatus,
@@ -216,6 +217,7 @@ class RetrievalChatService:
         llm_client: CompletionClient | None = None,
         analyzer: QueryAnalyzer | None = None,
         tokenizer: Tokenizer | None = None,
+        exact_repository_factory: Callable[[Session], ExactRepository] | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._embedder = embedder
@@ -223,6 +225,9 @@ class RetrievalChatService:
         self._answerer = EvidenceAnswerer(llm_client)
         self._analyzer = analyzer or QueryAnalyzer()
         self._tokenizer = tokenizer or JiebaTokenizer()
+        self._exact_repository_factory = (
+            exact_repository_factory or SQLAlchemyExactRepository
+        )
 
     def answer(self, query: str) -> RetrievalChatResult:
         plan = self._analyzer.analyze(query)
@@ -235,7 +240,7 @@ class RetrievalChatService:
             executor = RetrievalExecutor(
                 {
                     RetrievalMode.EXACT: ExactRetriever(
-                        SQLAlchemyExactRepository(session)
+                        self._exact_repository_factory(session)
                     ),
                     RetrievalMode.GRAPH: GraphRetriever(self._graph),
                     RetrievalMode.LEXICAL: LexicalRetriever(
@@ -300,9 +305,24 @@ def create_retrieval_chat_service() -> RetrievalChatService:
             temperature=settings.llm_temperature,
             max_tokens=settings.llm_max_tokens,
         )
+
+    from app.repositories.exact_cache import (
+        RedisExactRepositoryCache,
+        create_redis_client,
+    )
+
+    def exact_repository_factory(session: Session) -> ExactRepository:
+        return RedisExactRepositoryCache(
+            repository=SQLAlchemyExactRepository(session),
+            redis_client_factory=create_redis_client,
+            positive_ttl_seconds=settings.redis_exact_cache_ttl_seconds,
+            negative_ttl_seconds=settings.redis_exact_cache_negative_ttl_seconds,
+        )
+
     return RetrievalChatService(
         session_factory=get_postgres_session_factory(),
         embedder=create_bge_m3_embedder(),
         graph_service=GraphService(driver),
         llm_client=llm_client,
+        exact_repository_factory=exact_repository_factory,
     )

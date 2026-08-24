@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str = "demo123456"
 
+    # Redis 精确检索缓存（cache-aside；Redis 不可用时 fail-open 回源 PostgreSQL）
+    redis_url: str = "redis://localhost:6379/0"
+    redis_exact_cache_ttl_seconds: int = 300
+    redis_exact_cache_negative_ttl_seconds: int = 30
+    redis_connect_timeout_seconds: float = 2.0
+    redis_socket_timeout_seconds: float = 2.0
+
     demo_user_id: int = 1
     demo_offline_mode: bool = False
 
@@ -51,6 +58,26 @@ class Settings(BaseSettings):
         if path.is_absolute():
             return str(path)
         return str((PROJECT_ROOT / path).resolve())
+
+    @field_validator(
+        "redis_exact_cache_ttl_seconds",
+        "redis_exact_cache_negative_ttl_seconds",
+    )
+    @classmethod
+    def _positive_redis_ttl(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("Redis 缓存 TTL 必须为正整数")
+        return value
+
+    @field_validator(
+        "redis_connect_timeout_seconds",
+        "redis_socket_timeout_seconds",
+    )
+    @classmethod
+    def _positive_redis_timeout(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("Redis 超时配置必须为正数")
+        return value
 
     @property
     def postgres_database_url(self) -> str:

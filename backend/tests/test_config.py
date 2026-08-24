@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from app.config import DEFAULT_ENV_FILE, PROJECT_ROOT, Settings
 
 
@@ -30,3 +33,14 @@ def test_relative_data_paths_are_resolved_from_repository_root() -> None:
     assert Path(configured.bge_model_path) == (
         PROJECT_ROOT / "models/bge_m3"
     )
+
+
+def test_redis_timeout_defaults_and_boundary_validation() -> None:
+    configured = Settings(_env_file=None)
+    assert configured.redis_connect_timeout_seconds == 2.0
+    assert configured.redis_socket_timeout_seconds == 2.0
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, redis_connect_timeout_seconds=0)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, redis_socket_timeout_seconds=-1)
