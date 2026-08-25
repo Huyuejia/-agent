@@ -37,7 +37,9 @@ def create_app(initialize_database: bool = True) -> FastAPI:
     # 路由注册
     from app.api.documents import router as documents_router
     from app.api.conversations import router as conversations_router
+    from app.api.auth import router as auth_router
 
+    application.include_router(auth_router)
     application.include_router(documents_router)
     application.include_router(conversations_router)
 

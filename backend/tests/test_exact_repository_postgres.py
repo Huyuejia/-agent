@@ -22,12 +22,9 @@ def repo():
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    try:
-        engine = create_engine(TEST_DATABASE_URL)
-        with engine.connect():
-            pass
-    except Exception as exc:
-        pytest.skip(f"PostgreSQL 不可用: {exc}")
+    engine = create_engine(TEST_DATABASE_URL)
+    with engine.connect():
+        pass
 
     # 测试专用：按 metadata 建表（幂等）。正式 PostgreSQL schema 由 Alembic 迁移管理。
     from app.models.base import Base

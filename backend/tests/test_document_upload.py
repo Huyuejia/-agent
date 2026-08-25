@@ -138,16 +138,32 @@ def client() -> TestClient:
 
     from app.models.base import Base
     from app.models.document import Document
+    from app.models.user import User
 
     test_engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(bind=test_engine, tables=[Document.__table__])
+    Base.metadata.create_all(bind=test_engine, tables=[User.__table__, Document.__table__])
     TestingSessionLocal = sessionmaker(
         bind=test_engine, autocommit=False, autoflush=False
     )
+
+
+    auth_db = TestingSessionLocal()
+    admin = User(
+        email="admin@example.com",
+        normalized_email="admin@example.com",
+        password_hash="test-only",
+        role="admin",
+        is_active=True,
+    )
+    auth_db.add(admin)
+    auth_db.commit()
+    auth_db.refresh(admin)
+    admin_id = admin.id
+    auth_db.close()
 
     def override_postgres_db():
         db = TestingSessionLocal()
@@ -159,7 +175,11 @@ def client() -> TestClient:
     app.dependency_overrides[get_postgres_db] = override_postgres_db
 
     with TestClient(app) as tc:
+        from app.security.jwt import create_access_token
+
+        tc.headers.update({"Authorization": f"Bearer {create_access_token(admin_id)}"})
         yield tc
+
 
     app.dependency_overrides.clear()
 

@@ -40,6 +40,21 @@ def test_redis_timeout_defaults_and_boundary_validation() -> None:
     assert configured.redis_connect_timeout_seconds == 2.0
     assert configured.redis_socket_timeout_seconds == 2.0
 
+
+
+def test_jwt_defaults_and_boundary_validation() -> None:
+    configured = Settings(_env_file=None)
+    assert configured.jwt_algorithm == "RS256"
+    assert configured.jwt_issuer == "customer-intelligence-auth"
+    assert configured.jwt_audience == "customer-intelligence-api"
+    assert configured.jwt_access_token_expire_seconds == 900
+    assert Path(configured.jwt_private_key_path).is_absolute()
+    assert Path(configured.jwt_public_key_path).is_absolute()
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, jwt_access_token_expire_seconds=0)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, jwt_algorithm="HS256")
     with pytest.raises(ValidationError):
         Settings(_env_file=None, redis_connect_timeout_seconds=0)
     with pytest.raises(ValidationError):

@@ -34,11 +34,8 @@ def engine():
     if not TEST_DATABASE_URL:
         pytest.skip("TEST_DATABASE_URL 未设置，跳过 PostgreSQL 集成测试")
     eng = create_engine(TEST_DATABASE_URL)
-    try:
-        with eng.connect():
-            pass
-    except Exception as exc:
-        pytest.skip(f"PostgreSQL 不可用: {exc}")
+    with eng.connect():
+        pass
     return eng
 
 
@@ -102,7 +99,7 @@ def _vec(value: float, index: int) -> list[float]:
 def test_alembic_upgrade_reaches_current_head(migrated):
     with migrated.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    assert version == "0003"
+    assert version == "0004"
 
 
 def test_embedding_column_is_vector_1024(migrated):

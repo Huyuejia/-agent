@@ -7,6 +7,7 @@ POST /api/documents/search — PostgreSQL 全文 + 向量混合检索
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from app.dependencies.auth import get_current_user, require_admin
 from app.dependencies.retrieval import (
     get_document_indexing_service,
     get_document_search_service,
@@ -14,6 +15,7 @@ from app.dependencies.retrieval import (
 from app.indexing import IndexableChunk, IndexableDocument
 from app.indexing.service import DocumentIndexingService
 from app.models.document import Document
+from app.models.user import User
 from app.postgres_database import get_postgres_db
 from app.schemas.document import SearchRequest, SearchResponse, SourceItem, UploadResponse
 from app.services.document_search import PostgresDocumentSearchService
@@ -32,6 +34,7 @@ async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_postgres_db),
     indexing_service: DocumentIndexingService = Depends(get_document_indexing_service),
+    _admin: User = Depends(require_admin),
 ):
     """上传 PDF 或 DOCX，原子写入 PostgreSQL 文档元数据和检索片段。"""
     file_size = validate_file(file)
@@ -93,6 +96,7 @@ async def search_documents(
     search_service: PostgresDocumentSearchService = Depends(
         get_document_search_service
     ),
+    _current_user: User = Depends(get_current_user),
 ):
     """在 PostgreSQL 文档索引中执行词法 + 向量 RRF 检索。"""
     result = search_service.search(payload.query, top_k=4)

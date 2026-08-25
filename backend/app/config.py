@@ -27,8 +27,15 @@ class Settings(BaseSettings):
     redis_connect_timeout_seconds: float = 2.0
     redis_socket_timeout_seconds: float = 2.0
 
-    demo_user_id: int = 1
     demo_offline_mode: bool = False
+
+    # Short-lived RS256 access tokens. Keys stay in local ignored files.
+    jwt_private_key_path: str = "./secrets/jwt-private.pem"
+    jwt_public_key_path: str = "./secrets/jwt-public.pem"
+    jwt_algorithm: str = "RS256"
+    jwt_issuer: str = "customer-intelligence-auth"
+    jwt_audience: str = "customer-intelligence-api"
+    jwt_access_token_expire_seconds: int = 900
 
     # Optional external intent-model service; rules remain the safe default.
     intent_model_url: str | None = None
@@ -58,6 +65,28 @@ class Settings(BaseSettings):
         if path.is_absolute():
             return str(path)
         return str((PROJECT_ROOT / path).resolve())
+
+    @field_validator("jwt_private_key_path", "jwt_public_key_path")
+    @classmethod
+    def resolve_jwt_key_path(cls, value: str) -> str:
+        path = Path(value)
+        if path.is_absolute():
+            return str(path)
+        return str((PROJECT_ROOT / path).resolve())
+
+    @field_validator("jwt_algorithm")
+    @classmethod
+    def _rs256_only(cls, value: str) -> str:
+        if value != "RS256":
+            raise ValueError("JWT algorithm must be RS256")
+        return value
+
+    @field_validator("jwt_access_token_expire_seconds")
+    @classmethod
+    def _positive_access_token_ttl(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("JWT access token TTL must be positive")
+        return value
 
     @field_validator(
         "redis_exact_cache_ttl_seconds",

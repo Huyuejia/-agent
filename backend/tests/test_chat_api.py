@@ -132,15 +132,32 @@ def client():
     # 用 tables= 限制建表范围，避免共享 Base.metadata 里其它 PostgreSQL 专有表
     # （如 document_chunks）污染 SQLite 建表（CompileError）。
     from app.models.conversation import Conversation, Message
+    from app.models.user import User
 
     DocBase.metadata.create_all(
         bind=test_engine,
         tables=[
+            User.__table__,
             Conversation.__table__,
             Message.__table__,
         ],
     )
     TestingSessionLocal = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
+
+
+    auth_db = TestingSessionLocal()
+    user = User(
+        email="chat@example.com",
+        normalized_email="chat@example.com",
+        password_hash="test-only",
+        role="user",
+        is_active=True,
+    )
+    auth_db.add(user)
+    auth_db.commit()
+    auth_db.refresh(user)
+    user_id = user.id
+    auth_db.close()
 
     def override_get_db():
         db = TestingSessionLocal()
@@ -161,6 +178,9 @@ def client():
     conv_mod._orchestrator = fake_orch
 
     with TestClient(app) as tc:
+        from app.security.jwt import create_access_token
+
+        tc.headers.update({"Authorization": f"Bearer {create_access_token(user_id)}"})
         yield tc
 
     app.dependency_overrides.clear()

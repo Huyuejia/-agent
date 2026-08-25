@@ -38,10 +38,17 @@ const EXAMPLES = [
   { label: '天气', text: '今天天气怎么样' },
 ];
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : '发生未知错误';
+}
+
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 export default function App() {
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -53,20 +60,67 @@ export default function App() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+
+  function clearSession() {
+    setAccessToken(null);
+    setConversationId(null);
+    setMessages([]);
+    setPassword('');
+  }
+
+  async function handleLogin(event: React.FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || `登录失败 (${res.status})`);
+      }
+      const data = await res.json();
+      setAccessToken(data.access_token);
+      setPassword('');
+    } catch (error: unknown) {
+      setError(errorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleUnauthorized() {
+    clearSession();
+    setError('登录已过期，请重新登录');
+  }
+
+  function handleLogout() {
+    clearSession();
+    setError(null);
+  }
   // ---- new conversation ----
   async function handleNewConversation() {
+    if (!accessToken) return;
     setError(null);
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/conversations?title=客服会话`, {
         method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!res.ok) throw new Error(`创建会话失败 (${res.status})`);
       const data = await res.json();
       setConversationId(data.conversation_id);
       setMessages([]);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (error: unknown) {
+      setError(errorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -74,7 +128,7 @@ export default function App() {
 
   // ---- send message ----
   async function sendMessage(text: string) {
-    if (!conversationId || !text.trim()) return;
+    if (!accessToken || !conversationId || !text.trim()) return;
     setError(null);
     const userMsg: Message = { role: 'user', content: text };
     setMessages((prev) => [...prev, userMsg]);
@@ -84,9 +138,16 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({ conversation_id: conversationId, message: text }),
       });
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `请求失败 (${res.status})`);
@@ -94,8 +155,8 @@ export default function App() {
       const data: ChatResponse = await res.json();
       const assistantMsg: Message = { role: 'assistant', content: data.answer, detail: data };
       setMessages((prev) => [...prev, assistantMsg]);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (error: unknown) {
+      setError(errorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -109,6 +170,43 @@ export default function App() {
   }
 
   // ---- render ----
+  if (!accessToken) {
+    return (
+      <div className="auth-page">
+        <form className="auth-card" onSubmit={handleLogin}>
+          <div className="auth-kicker">Customer Intelligence Workbench</div>
+          <h1>登录智能客服工作台</h1>
+          <p>Access Token 仅保存在当前页面内存中，刷新页面后需要重新登录。</p>
+          {error && <div className="wb-error">{error}</div>}
+          <label>
+            邮箱
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="username"
+              required
+            />
+          </label>
+          <label>
+            密码
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              minLength={8}
+              required
+            />
+          </label>
+          <button className="wb-btn auth-submit" type="submit" disabled={loading}>
+            {loading ? '登录中…' : '登录'}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="workbench">
       {/* header */}
@@ -120,6 +218,13 @@ export default function App() {
           disabled={loading}
         >
           新建会话
+        </button>
+        <button
+          className="wb-btn wb-btn-logout"
+          onClick={handleLogout}
+          disabled={loading}
+        >
+          退出
         </button>
       </header>
 

@@ -41,6 +41,8 @@ outputs/
 # Environment
 .env
 .env.local
+secrets/
+*.pem
 
 # IDE
 .vscode/

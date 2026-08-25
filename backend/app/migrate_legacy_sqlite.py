@@ -7,11 +7,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.config import PROJECT_ROOT
 from app.models.conversation import Conversation, Message
+from app.models.user import User
 
 
 @dataclass
@@ -32,6 +33,20 @@ def migrate_legacy_sqlite(path: Path, target: Session) -> MigrationSummary:
     source.row_factory = sqlite3.Row
     try:
         for row in source.execute("SELECT * FROM conversations ORDER BY id"):
+            legacy_email = f"legacy-{row['demo_user_id']}@local.invalid"
+            owner = target.scalar(
+                select(User).where(User.normalized_email == legacy_email)
+            )
+            if owner is None:
+                owner = User(
+                    email=legacy_email,
+                    normalized_email=legacy_email,
+                    password_hash="!legacy-disabled!",
+                    role="user",
+                    is_active=False,
+                )
+                target.add(owner)
+                target.flush()
             existing = target.get(Conversation, row["id"])
             if existing is not None:
                 if existing.title != row["title"]:
@@ -40,7 +55,7 @@ def migrate_legacy_sqlite(path: Path, target: Session) -> MigrationSummary:
             target.add(
                 Conversation(
                     id=row["id"],
-                    demo_user_id=row["demo_user_id"],
+                    user_id=owner.id,
                     title=row["title"],
                     created_at=_datetime(row["created_at"]),
                 )

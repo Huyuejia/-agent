@@ -25,6 +25,7 @@ from app.models import (  # noqa: F401
     error_code,
     order,
     product,
+    user,
 )
 
 config = context.config

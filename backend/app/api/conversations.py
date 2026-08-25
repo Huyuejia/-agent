@@ -5,11 +5,14 @@ POST /api/chat               — 发送消息并获取回答
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.dependencies.auth import get_current_user
 from app.postgres_database import get_postgres_db
 from app.models.conversation import Conversation, Message
+from app.models.user import User
 from app.schemas.conversation import (
     ChatRequest,
     ChatResponse,
@@ -64,9 +67,10 @@ def _get_orchestrator() -> ChatOrchestrator:
 def create_conversation(
     title: str = "新会话",
     db: Session = Depends(get_postgres_db),
+    current_user: User = Depends(get_current_user),
 ):
     """创建新会话。"""
-    conv = Conversation(title=title[:255])
+    conv = Conversation(title=title[:255], user_id=current_user.id)
     db.add(conv)
     db.commit()
     db.refresh(conv)
@@ -84,10 +88,16 @@ def create_conversation(
 def chat(
     payload: ChatRequest,
     db: Session = Depends(get_postgres_db),
+    current_user: User = Depends(get_current_user),
 ):
     """发送消息，获取意图、来源引用和回答。"""
-    # 1. 校验会话存在
-    conv = db.get(Conversation, payload.conversation_id)
+    # 1. 同时校验存在性与归属；跨用户和不存在都返回 404。
+    conv = db.scalar(
+        select(Conversation).where(
+            Conversation.id == payload.conversation_id,
+            Conversation.user_id == current_user.id,
+        )
+    )
     if conv is None:
         raise HTTPException(
             status_code=404,
