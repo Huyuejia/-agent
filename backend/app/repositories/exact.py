@@ -97,6 +97,14 @@ class SQLAlchemyExactRepository(ExactRepository):
                     record_id=str(row.id),
                     display_identifier=row.code,
                     table="error_codes",
+                    attributes={
+                        key: value
+                        for key, value in {
+                            "message": row.message,
+                            "resolution": row.resolution,
+                        }.items()
+                        if value
+                    },
                 )
                 for row in rows
             )
