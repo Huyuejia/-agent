@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, Sequence
 
 
@@ -15,6 +15,8 @@ class ResolvedEntity:
     record_id: str          # 数据库稳定 UUID
     display_identifier: str  # 原始展示标识符（sku / order_no / serial / code）
     table: str              # "products" | "orders" | "devices" | "error_codes"
+    # 仅存放允许进入 Evidence 的公开业务字段，不得放入用户或内部敏感信息。
+    attributes: dict[str, str] = field(default_factory=dict)
 
 
 class ExactRepository(Protocol):

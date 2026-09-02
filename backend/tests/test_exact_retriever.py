@@ -100,3 +100,61 @@ def test_implements_retriever_protocol():
     from app.retrieval import Retriever
 
     assert isinstance(ExactRetriever(FakeExactRepository()), Retriever)
+
+
+def test_error_code_evidence_contains_business_fields():
+    repo = FakeExactRepository(
+        [
+            ResolvedEntity(
+                entity_type="error_code",
+                normalized_value="E1001",
+                record_id="11111111-1111-1111-1111-111111111111",
+                display_identifier="E1001",
+                table="error_codes",
+                attributes={
+                    "message": "设备离线",
+                    "resolution": "检查设备电源和网络连接",
+                },
+            )
+        ]
+    )
+
+    evidence = ExactRetriever(repo).retrieve(
+        "E1001 怎么处理",
+        _step(
+            {
+                "entity_types": ["error_code"],
+                "entity_values": ["E1001"],
+            }
+        ),
+    )[0]
+
+    assert evidence.metadata["message"] == "设备离线"
+    assert evidence.metadata["resolution"] == "检查设备电源和网络连接"
+    assert "设备离线" in evidence.text
+    assert "检查设备电源和网络连接" in evidence.text
+
+
+def test_error_code_without_business_fields_keeps_identifier_text():
+    repo = FakeExactRepository(
+        [
+            _resolved(
+                entity_type="error_code",
+                normalized_value="E1001",
+                display_identifier="E1001",
+                table="error_codes",
+            )
+        ]
+    )
+
+    evidence = ExactRetriever(repo).retrieve(
+        "E1001 怎么处理",
+        _step(
+            {
+                "entity_types": ["error_code"],
+                "entity_values": ["E1001"],
+            }
+        ),
+    )[0]
+
+    assert evidence.text == "E1001"

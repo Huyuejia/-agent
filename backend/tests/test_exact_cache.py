@@ -22,9 +22,15 @@ def _entity(
     record_id="11111111-1111-1111-1111-111111111111",
     display_identifier="Cam-A1",
     table="products",
+    attributes=None,
 ):
     return ResolvedEntity(
-        entity_type, normalized_value, record_id, display_identifier, table
+        entity_type,
+        normalized_value,
+        record_id,
+        display_identifier,
+        table,
+        dict(attributes or {}),
     )
 
 
@@ -208,7 +214,7 @@ def test_missing_entity_writes_explicit_negative_marker():
 
     raw = redis.store[redis_key("sku", "GHOST")]
     data = json.loads(raw.decode("utf-8"))
-    assert data["v"] == 1
+    assert data["v"] == 2
     assert data["kind"] == "miss"
     assert decode(raw) == ("negative", None)
 
@@ -247,6 +253,21 @@ def test_encode_decode_roundtrip_and_miss_marker():
          "record_id": "r", "display_identifier": "x", "table": "products"}
     ).encode()
     assert decode(unknown) == ("miss", None)
+
+
+def test_encode_decode_preserves_business_attributes():
+    entity = _entity(
+        entity_type="error_code",
+        normalized_value="E1001",
+        display_identifier="E1001",
+        table="error_codes",
+        attributes={
+            "message": "设备离线",
+            "resolution": "检查设备电源和网络连接",
+        },
+    )
+
+    assert decode(encode_entity(entity)) == ("positive", entity)
 
 
 def test_negative_cache_hit_does_not_refresh_ttl():

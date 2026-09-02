@@ -19,9 +19,9 @@ from app.retrieval.exact_repository import ExactRepository, ResolvedEntity
 
 logger = logging.getLogger(__name__)
 
-# 缓存 schema 版本；key 前缀本身也带 v1。
-_SCHEMA_VERSION = 1
-_KEY_PREFIX = "ciw:exact:v1"
+# ResolvedEntity 新增公开业务属性；升级版本和 key 前缀，避免读取旧格式缓存。
+_SCHEMA_VERSION = 2
+_KEY_PREFIX = "ciw:exact:v2"
 _KIND_ENTITY = "entity"
 _KIND_MISS = "miss"
 
@@ -52,6 +52,7 @@ def encode_entity(entity: ResolvedEntity) -> bytes:
         "record_id": entity.record_id,
         "display_identifier": entity.display_identifier,
         "table": entity.table,
+        "attributes": entity.attributes,
     }
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
@@ -83,12 +84,19 @@ def decode(raw: bytes | None) -> tuple[str, ResolvedEntity | None]:
         return "negative", None
     if kind == _KIND_ENTITY:
         try:
+            attributes = data["attributes"]
+            if not isinstance(attributes, dict) or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in attributes.items()
+            ):
+                raise TypeError("attributes 必须是 str 到 str 的字典")
             entity = ResolvedEntity(
                 entity_type=data["entity_type"],
                 normalized_value=data["normalized_value"],
                 record_id=data["record_id"],
                 display_identifier=data["display_identifier"],
                 table=data["table"],
+                attributes=dict(attributes),
             )
         except (KeyError, TypeError) as exc:
             logger.warning(

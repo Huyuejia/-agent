@@ -83,6 +83,10 @@ def test_resolve_error_code(repo):
     r = resolved[0]
     assert r.table == "error_codes"
     assert r.normalized_value == "E1001"
+    assert r.attributes == {
+        "message": "摄像头离线",
+        "resolution": "检查 Wi-Fi 并重启设备",
+    }
 
 
 def test_miss_returns_empty(repo):
