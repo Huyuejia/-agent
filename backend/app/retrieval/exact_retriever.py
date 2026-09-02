@@ -28,7 +28,8 @@ class ExactRetriever:
         return Evidence(
             evidence_id=f"{item.table}:{item.record_id}",
             kind=RetrievalMode.EXACT,
-            text=item.display_identifier,
+            text=ExactRetriever._evidence_text(item),
+            metadata=dict(item.attributes),
             citation=Citation(
                 source_type=item.table,
                 payload={
@@ -39,3 +40,20 @@ class ExactRetriever:
             ),
             entity_ids=[item.record_id],
         )
+
+    @staticmethod
+    def _evidence_text(item: ResolvedEntity) -> str:
+        """把允许公开的精确查询属性转换为回答可消费的证据文本。"""
+        if item.entity_type != "error_code":
+            return item.display_identifier
+
+        message = item.attributes.get("message")
+        resolution = item.attributes.get("resolution")
+        parts = [f"错误码 {item.display_identifier}"]
+        if message:
+            parts.append(message)
+        if resolution:
+            parts.append(f"处理建议：{resolution}")
+        if len(parts) == 1:
+            return item.display_identifier
+        return "；".join(parts)
