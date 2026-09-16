@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline";
 import { Agent, type AgentTool } from "@earendil-works/pi-agent-core";
+import { Unsafe, type TSchema } from "typebox";
 import {
-  Type,
   fauxAssistantMessage,
   fauxText,
   fauxToolCall,
@@ -57,44 +57,19 @@ async function callPythonTool(
   return result;
 }
 
-const exactSchema = Type.Object(
-  {
-    entity_type: Type.Union([
-      Type.Literal("sku"),
-      Type.Literal("order"),
-      Type.Literal("serial"),
-      Type.Literal("error_code"),
-    ]),
-    identifier: Type.String({ minLength: 1, maxLength: 64 }),
-  },
-  { additionalProperties: false },
-);
-const graphSchema = Type.Object(
-  {
-    operation: Type.Union([
-      Type.Literal("warranty"),
-      Type.Literal("protocols"),
-      Type.Literal("compatibility"),
-    ]),
-    product_a: Type.String(),
-    product_b: Type.Optional(Type.String()),
-  },
-  { additionalProperties: false },
-);
-const knowledgeSchema = Type.Object(
-  {
-    query: Type.String({ minLength: 1, maxLength: 500 }),
-    top_k: Type.Optional(Type.Integer({ minimum: 1, maximum: 5 })),
-  },
-  { additionalProperties: false },
-);
-
-function makeTool(name: string, label: string, description: string, parameters: any): AgentTool {
+function makeTool(
+  name: string,
+  label: string,
+  description: string,
+  schema: JsonObject,
+): AgentTool {
   return {
     name,
     label,
     description,
-    parameters,
+    // Python owns validation and sends the Pydantic-generated schema. Wrapping it
+    // gives Pi its required TypeBox marker without duplicating constraints here.
+    parameters: Unsafe(schema as TSchema),
     executionMode: "sequential",
     async execute(callId: string, rawParams: unknown) {
       const params = rawParams as JsonObject;
@@ -107,25 +82,19 @@ function makeTool(name: string, label: string, description: string, parameters: 
   };
 }
 
-const allowListedTools: Record<string, AgentTool> = {
-  exact_lookup: makeTool(
-    "exact_lookup",
-    "Exact lookup",
-    "Resolve one explicit SKU, order, serial, or error-code identifier.",
-    exactSchema,
-  ),
-  graph_lookup: makeTool(
-    "graph_lookup",
-    "Graph lookup",
-    "Read a product warranty, protocol list, or compatibility relation.",
-    graphSchema,
-  ),
-  knowledge_search: makeTool(
-    "knowledge_search",
-    "Knowledge search",
-    "Search uploaded policy knowledge without modifying business data.",
-    knowledgeSchema,
-  ),
+const allowListedTools = {
+  exact_lookup: {
+    label: "Exact lookup",
+    description: "Resolve one explicit SKU, order, serial, or error-code identifier.",
+  },
+  graph_lookup: {
+    label: "Graph lookup",
+    description: "Read a product warranty, protocol list, or compatibility relation.",
+  },
+  knowledge_search: {
+    label: "Knowledge search",
+    description: "Search uploaded policy knowledge without modifying business data.",
+  },
 };
 
 function messageText(message: AssistantMessage | ToolResultMessage): string {
@@ -193,6 +162,10 @@ async function main(): Promise<void> {
   if (enabledNames.some((name) => !(name in allowListedTools))) {
     throw new Error("Python requested a tool outside the fixed allow-list");
   }
+  const tools = enabledNames.map((name) => {
+    const metadata = allowListedTools[name as keyof typeof allowListedTools];
+    return makeTool(name, metadata.label, metadata.description, request.toolSchemas[name]);
+  });
   const scripted = request.scriptedScenario
     ? scriptedModel(request.scriptedScenario)
     : undefined;
@@ -209,7 +182,7 @@ async function main(): Promise<void> {
         "evidence_refs, and handoff_required. Cite only evidence IDs returned by tools.",
       model,
       thinkingLevel: "off",
-      tools: enabledNames.map((name) => allowListedTools[name]),
+      tools,
     },
   });
   agent.subscribe((event) => {
