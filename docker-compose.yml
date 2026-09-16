@@ -2,6 +2,46 @@
 
 services:
 
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    image: customer-intelligence-gateway:local
+    container_name: ciw-gateway
+    restart: unless-stopped
+    environment:
+      GATEWAY_ADDR: ${GATEWAY_ADDR:-:8080}
+      UPSTREAM_URL: ${UPSTREAM_URL:-http://host.docker.internal:8000}
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
+      JWT_ISSUER: ${JWT_ISSUER:-customer-intelligence-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-customer-intelligence-api}
+      UPSTREAM_TIMEOUT: ${UPSTREAM_TIMEOUT:-30s}
+      READINESS_TIMEOUT: ${READINESS_TIMEOUT:-2s}
+      READ_HEADER_TIMEOUT: ${READ_HEADER_TIMEOUT:-5s}
+      READ_TIMEOUT: ${READ_TIMEOUT:-30s}
+      WRITE_TIMEOUT: ${WRITE_TIMEOUT:-35s}
+      IDLE_TIMEOUT: ${IDLE_TIMEOUT:-60s}
+      GATEWAY_REDIS_URL: ${GATEWAY_REDIS_URL:-redis://redis:6379/0}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_KEY_PREFIX: ${RATE_LIMIT_KEY_PREFIX:-ciw:gateway:ratelimit:v1}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1m}
+      RATE_LIMIT_REDIS_TIMEOUT: ${RATE_LIMIT_REDIS_TIMEOUT:-100ms}
+      RATE_LIMIT_AUTH_REQUESTS: ${RATE_LIMIT_AUTH_REQUESTS:-10}
+      RATE_LIMIT_CHAT_REQUESTS: ${RATE_LIMIT_CHAT_REQUESTS:-20}
+      RATE_LIMIT_USER_REQUESTS: ${RATE_LIMIT_USER_REQUESTS:-60}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    volumes:
+      - ${JWT_PUBLIC_KEY_PATH:-./secrets/jwt-public.pem}:/run/secrets/jwt-public.pem:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
   redis:
     image: redis:7-alpine
     container_name: ciw-redis

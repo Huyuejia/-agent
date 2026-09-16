@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import create_tables
+from app.observability import request_observability
 
 
 def create_app(initialize_database: bool = True) -> FastAPI:
@@ -33,6 +34,7 @@ def create_app(initialize_database: bool = True) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    application.middleware("http")(request_observability)
 
     # 路由注册
     from app.api.documents import router as documents_router

@@ -7,9 +7,11 @@
 | 层级 | 技术 |
 |------|------|
 | 前端 | React + Vite + TypeScript |
+| API 网关 | Go 1.27 标准库反向代理 + RS256 JWT 预校验 |
 | API | FastAPI + Pydantic + SQLAlchemy |
 | 微调 | Qwen2.5-1.5B-Instruct + QLoRA (PEFT + bitsandbytes) |
 | 图谱 | Neo4j 5 |
+| 缓存 | Redis 7（精确检索 cache-aside） |
 | 文档 RAG | PostgreSQL FTS + pgvector + RRF + 本地 BGE-M3（GPU） |
 | 关系库 | PostgreSQL 16（业务数据、会话、文档与向量统一存储） |
 
@@ -27,7 +29,7 @@ cp .env.example .env
 ### 2. 启动数据库
 
 ```bash
-docker compose up -d postgres neo4j
+docker compose up -d postgres neo4j redis
 ```
 
 等待健康检查通过：
@@ -49,7 +51,16 @@ python -m app.seed_demo_knowledge
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 4. 启动前端
+### 4. 启动 API 网关
+
+保持 FastAPI 运行，再从项目根目录执行：
+
+```bash
+docker compose up -d gateway
+curl http://localhost:8080/ready
+```
+
+### 5. 启动前端
 
 ```bash
 cd frontend
@@ -61,6 +72,7 @@ npm run dev
 
 ```
 customer-intelligence-workbench/
+├── gateway/          Go API 网关、JWT 预校验与反向代理
 ├── backend/          FastAPI 应用
 │   ├── app/
 │   │   ├── api/      API 路由
@@ -84,12 +96,33 @@ customer-intelligence-workbench/
 
 | 接口 | 职责 |
 |------|------|
-| `POST /api/documents` | 上传 PDF/DOCX |
-| `POST /api/conversations` | 创建会话 |
-| `GET /api/conversations` | 会话列表 |
-| `GET /api/conversations/{id}/messages` | 消息历史 |
-| `POST /api/conversations/{id}/chat` | 意图识别 + 路由 + 回答 |
-| `GET /api/evaluation` | 评测指标与错误样例 |
+| `POST /api/auth/register` | 注册普通用户 |
+| `POST /api/auth/login` | 获取短期 RS256 Access Token |
+| `GET /api/auth/me` | 获取当前用户 |
+| `POST /api/documents` | 管理员上传 PDF/DOCX |
+| `POST /api/documents/search` | 登录用户检索文档 |
+| `POST /api/conversations` | 创建当前用户会话 |
+| `POST /api/chat` | 校验会话归属后执行意图识别、检索与回答 |
+
+## 检索质量基线
+
+从项目根目录运行确定性 routing golden dataset：
+
+```bash
+backend/.venv/bin/python scripts/evaluate_retrieval_routing.py
+```
+
+当前 ranking 指标实现位于 `backend/app/evaluation/metrics.py`；扩充多文档相关性标注后再报告 Recall@k/MRR。
+
+## CI 与 PR
+
+仓库通过 GitHub Actions 在每个 Pull Request 上并行执行：
+
+- 后端 Python 单元测试（不下载 GPU 模型依赖）
+- Go 网关测试
+- 前端 ESLint 与生产构建
+
+涉及真实 PostgreSQL、Redis 或 Neo4j 的集成测试保留为本地显式运行，基础 CI 聚焦快速、可重复的回归检查。
 
 ## 演示场景
 
@@ -99,6 +132,8 @@ customer-intelligence-workbench/
 
 ## 局限
 
-- 不包含用户认证、Redis 缓存、联网搜索、图片识别
+- 当前只有 Access Token，没有 Refresh Token、撤销列表或密钥轮换
+- 网关采用简单固定窗口限流，尚未实现可信代理链配置、TLS 终止与服务发现
+- 不包含联网搜索和图片识别
 - 知识图谱使用虚构品牌"智家"数据
 - 模型评测指标需在云 GPU 训练完成后填入
