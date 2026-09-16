@@ -86,27 +86,29 @@ class SQLAlchemyExactRepository(ExactRepository):
 
         if "error_code" in grouped:
             rows = (
-                self._session.query(ErrorCode)
+                self._session.query(ErrorCode, Product)
+                .outerjoin(Product, Product.id == ErrorCode.product_id)
                 .filter(ErrorCode.normalized_code.in_(grouped["error_code"]))
                 .all()
             )
             results.extend(
                 ResolvedEntity(
                     entity_type="error_code",
-                    normalized_value=row.normalized_code,
-                    record_id=str(row.id),
-                    display_identifier=row.code,
+                    normalized_value=error.normalized_code,
+                    record_id=str(error.id),
+                    display_identifier=error.code,
                     table="error_codes",
                     attributes={
                         key: value
                         for key, value in {
-                            "message": row.message,
-                            "resolution": row.resolution,
+                            "message": error.message,
+                            "resolution": error.resolution,
+                            "product_sku": product.sku if product else None,
                         }.items()
                         if value
                     },
                 )
-                for row in rows
+                for error, product in rows
             )
 
         return results

@@ -86,6 +86,7 @@ def test_resolve_error_code(repo):
     assert r.attributes == {
         "message": "摄像头离线",
         "resolution": "检查 Wi-Fi 并重启设备",
+        "product_sku": "Cam-A1",
     }
 
 

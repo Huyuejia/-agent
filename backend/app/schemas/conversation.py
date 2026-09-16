@@ -38,3 +38,6 @@ class ChatResponse(BaseModel):
     source_type: str
     sources: list[MessageSource]
     handoff_required: bool
+    execution_mode: str | None = None
+    agent_run_id: str | None = None
+    task_status: str | None = None

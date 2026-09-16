@@ -222,12 +222,14 @@ class RetrievalChatService:
         self._session_factory = session_factory
         self._embedder = embedder
         self._graph = graph_service
+        self.graph_service = graph_service
         self._answerer = EvidenceAnswerer(llm_client)
         self._analyzer = analyzer or QueryAnalyzer()
         self._tokenizer = tokenizer or JiebaTokenizer()
         self._exact_repository_factory = (
             exact_repository_factory or SQLAlchemyExactRepository
         )
+        self.exact_repository_factory = self._exact_repository_factory
 
     def answer(self, query: str) -> RetrievalChatResult:
         plan = self._analyzer.analyze(query)

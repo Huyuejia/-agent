@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.2
     llm_max_tokens: int = 512
 
+    # Thin in-memory Pi runtime adapter (Node/TypeScript over JSONL stdio)
+    pi_node_command: str = "node"
+    pi_model_provider: str = "openai"
+    pi_model: str = "gpt-5-mini"
+    pi_runtime_timeout_seconds: float = 60.0
+    agent_max_tool_calls: int = 6
+
     # BGE-M3 local model
     bge_model_path: str = "./models/bge_m3"
     bge_model_name: str = "BAAI/bge-m3"
@@ -106,6 +113,20 @@ class Settings(BaseSettings):
     def _positive_redis_timeout(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("Redis 超时配置必须为正数")
+        return value
+
+    @field_validator("pi_runtime_timeout_seconds")
+    @classmethod
+    def _positive_pi_timeout(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("Pi runtime timeout must be positive")
+        return value
+
+    @field_validator("agent_max_tool_calls")
+    @classmethod
+    def _positive_agent_tool_limit(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("Agent tool-call limit must be positive")
         return value
 
     @property

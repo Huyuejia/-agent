@@ -15,7 +15,10 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.agent.domain import ExecutionMode
+from app.agent.routing import ExecutionRouter
 from app.models.conversation import Conversation, Message
+from app.observability import current_request_id
 from app.schemas.conversation import MessageSource
 
 logger = logging.getLogger(__name__)
@@ -206,9 +209,13 @@ class ChatOrchestrator:
         rag_service=None,
         classifier=None,
         retrieval_service=None,
+        agent_service=None,
+        execution_router=None,
     ) -> None:
         self._classifier = classifier or RuleBasedIntentClassifier()
         self._retrieval_service = retrieval_service
+        self._agent_service = agent_service
+        self._execution_router = execution_router or ExecutionRouter()
 
         # 惰性导入真实服务，避免测试环境依赖
         if graph_service is not None:
@@ -260,10 +267,42 @@ class ChatOrchestrator:
         message: str,
         conversation_id: int,
         db: Session,
+        user_id: int | None = None,
+        request_id: str = "",
     ) -> dict:
         """
         完整编排：分类 → 路由 → 保存 → 返回 ChatResponse 字典。
         """
+        decision = self._execution_router.decide(message)
+        if decision.mode is ExecutionMode.AGENT:
+            if self._agent_service is None:
+                result = {
+                    "answer": "Agent 运行时尚未配置，请稍后重试或联系人工客服。",
+                    "intent": "agent_unavailable",
+                    "confidence": 0.0,
+                    "source_type": "fallback",
+                    "sources": [],
+                    "handoff_required": True,
+                    "execution_mode": "agent",
+                    "task_status": "FAILED",
+                }
+            else:
+                if user_id is None:
+                    conversation = db.get(Conversation, conversation_id)
+                    if conversation is None:
+                        raise ValueError("conversation does not exist")
+                    user_id = conversation.user_id
+                result = self._agent_service.execute(
+                    objective=message,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    request_id=request_id or current_request_id(),
+                    boundary_reason=decision.reason_code,
+                    db=db,
+                )
+            self._save_result(db, conversation_id, message, result)
+            return {"conversation_id": conversation_id, **result}
+
         if self._retrieval_service is not None:
             try:
                 result = self._retrieval_service.answer(message)
@@ -281,17 +320,7 @@ class ChatOrchestrator:
                     "handoff_required": True,
                 }
 
-            self._save_messages(
-                db,
-                conversation_id=conversation_id,
-                user_text=message,
-                assistant_text=result["answer"],
-                intent=result["intent"],
-                confidence=int(result["confidence"] * 100),
-                source_type=result["source_type"],
-                sources=result["sources"],
-                handoff_required=result["handoff_required"],
-            )
+            self._save_result(db, conversation_id, message, result)
             return {
                 "conversation_id": conversation_id,
                 "answer": result["answer"],
@@ -300,6 +329,7 @@ class ChatOrchestrator:
                 "source_type": result["source_type"],
                 "sources": result["sources"],
                 "handoff_required": result["handoff_required"],
+                "execution_mode": "workflow",
             }
 
         intent, confidence = self._classifier.predict(message)
@@ -456,11 +486,32 @@ class ChatOrchestrator:
             "source_type": source_type,
             "sources": sources,
             "handoff_required": handoff_required,
+            "execution_mode": "workflow",
         }
 
     # ------------------------------------------------------------------
     # 消息持久化
     # ------------------------------------------------------------------
+    @classmethod
+    def _save_result(
+        cls,
+        db: Session,
+        conversation_id: int,
+        user_text: str,
+        result: dict,
+    ) -> None:
+        cls._save_messages(
+            db,
+            conversation_id=conversation_id,
+            user_text=user_text,
+            assistant_text=result["answer"],
+            intent=result["intent"],
+            confidence=int(result["confidence"] * 100),
+            source_type=result["source_type"],
+            sources=result["sources"],
+            handoff_required=result["handoff_required"],
+        )
+
     @staticmethod
     def _save_messages(
         db: Session,

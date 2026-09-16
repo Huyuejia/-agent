@@ -45,13 +45,17 @@ def _get_orchestrator() -> ChatOrchestrator:
                 fallback=classifier,
             )
         retrieval_service = None
+        agent_service = None
         if not settings.demo_offline_mode:
+            from app.agent.factory import create_agent_task_service
             from app.services.retrieval_chat import create_retrieval_chat_service
 
             retrieval_service = create_retrieval_chat_service()
+            agent_service = create_agent_task_service(retrieval_service)
         _orchestrator = ChatOrchestrator(
             classifier=classifier,
             retrieval_service=retrieval_service,
+            agent_service=agent_service,
         )
     return _orchestrator
 
