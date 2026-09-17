@@ -1,9 +1,17 @@
 """Public AgentTaskService recovery and bounded-failure behavior."""
 
 from sqlalchemy import create_engine, select
+import pytest
 from sqlalchemy.orm import sessionmaker
 
-from app.agent.domain import AgentCandidate, RuntimeResult, ToolResult, ToolStatus
+from app.agent.domain import (
+    AgentCandidate,
+    RuntimeResult,
+    TaskState,
+    TaskStatus,
+    ToolResult,
+    ToolStatus,
+)
 from app.agent.service import AgentTaskService
 from app.models.agent_run import AgentRun, AgentTraceEvent
 from app.models.base import Base
@@ -203,3 +211,31 @@ def test_tool_limit_and_runtime_failure_are_safe_and_evidence_preserving():
     run = db.get(AgentRun, result["agent_run_id"])
     assert run.task_state["evidence_refs"] == ["neo4j:warranty:Cam-A1"]
     assert run.failure_category == "AGENT_RUNTIME_ERROR"
+
+
+def test_service_rejects_a_new_task_while_the_conversation_has_an_active_run():
+    db = _database()
+    user, conversation = _context(db)
+    active_state = TaskState(
+        task_id="active-run",
+        conversation_id=conversation.id,
+        objective="正在执行的任务",
+    )
+    db.add(
+        AgentRun(
+            id="active-run",
+            conversation_id=conversation.id,
+            user_id=user.id,
+            request_id="active-request",
+            objective=active_state.objective,
+            execution_mode="agent",
+            status=TaskStatus.RUNNING.value,
+            task_state=active_state.model_dump(mode="json"),
+            runtime_version="test",
+        )
+    )
+    db.commit()
+    service, _adapter = _service(OneToolRuntime(), [_success_result()])
+
+    with pytest.raises(ValueError, match="active agent task"):
+        _execute(service, db, user, conversation)

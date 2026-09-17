@@ -20,6 +20,7 @@ from app.agent.domain import (
 from app.agent.tools import AgentToolAdapter
 from app.agent.verification import CandidateVerifier
 from app.models.agent_run import AgentRun, AgentTraceEvent
+from app.models.conversation import Conversation
 from app.schemas.conversation import MessageSource
 
 
@@ -64,6 +65,34 @@ class AgentTaskService:
             .order_by(AgentRun.started_at.desc())
         )
 
+    def active_run_id(self, *, conversation_id: int, user_id: int, db: Session) -> str | None:
+        return db.scalar(
+            select(AgentRun.id)
+            .where(
+                AgentRun.conversation_id == conversation_id,
+                AgentRun.user_id == user_id,
+                AgentRun.status.in_(
+                    [
+                        TaskStatus.RUNNING.value,
+                        TaskStatus.WAITING_FOR_USER.value,
+                        TaskStatus.VERIFYING.value,
+                    ]
+                ),
+            )
+            .order_by(AgentRun.started_at.desc())
+        )
+
+    @staticmethod
+    def _lock_conversation(*, conversation_id: int, user_id: int, db: Session) -> None:
+        conversation = db.scalar(
+            select(Conversation)
+            .where(Conversation.id == conversation_id, Conversation.user_id == user_id)
+            .with_for_update()
+        )
+        if conversation is None:
+            raise ValueError("conversation does not exist")
+
+
     def execute(
         self,
         *,
@@ -75,6 +104,7 @@ class AgentTaskService:
         db: Session,
         resume_run_id: str | None = None,
     ) -> dict[str, Any]:
+        self._lock_conversation(conversation_id=conversation_id, user_id=user_id, db=db)
         if resume_run_id:
             run = db.scalar(
                 select(AgentRun).where(
@@ -100,11 +130,11 @@ class AgentTaskService:
                 )
             ) or 0
         else:
-            active_run_id = self.waiting_run_id(
+            active_run_id = self.active_run_id(
                 conversation_id=conversation_id, user_id=user_id, db=db
             )
             if active_run_id:
-                raise ValueError("waiting agent task must be resumed")
+                raise ValueError("active agent task must be resumed or completed")
             run_id = str(uuid.uuid4())
             state = TaskState(
                 task_id=run_id,

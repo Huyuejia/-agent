@@ -310,11 +310,6 @@ class ChatOrchestrator:
                     "task_status": "FAILED",
                 }
             else:
-                if user_id is None:
-                    conversation = db.get(Conversation, conversation_id)
-                    if conversation is None:
-                        raise ValueError("conversation does not exist")
-                    user_id = conversation.user_id
                 result = self._agent_service.execute(
                     objective=message,
                     conversation_id=conversation_id,

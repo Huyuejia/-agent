@@ -56,7 +56,6 @@ class Settings(BaseSettings):
     pi_runtime_timeout_seconds: float = 60.0
     agent_max_tool_calls: int = 6
     agent_max_tool_retries: int = 1
-    agent_max_tool_retries: int = 1
 
     # BGE-M3 local model
     bge_model_path: str = "./models/bge_m3"
