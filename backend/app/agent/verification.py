@@ -19,10 +19,18 @@ class CandidateVerifier:
                 accepted=False,
                 error_code="UNOBSERVED_EVIDENCE",
             )
-        if any(
-            observation.result.status is ToolStatus.ERROR
-            for observation in state.tool_observations
-        ):
+        unresolved_errors = [
+            observation
+            for index, observation in enumerate(state.tool_observations)
+            if observation.result.status is ToolStatus.ERROR
+            and not any(
+                later.tool_name == observation.tool_name
+                and later.arguments == observation.arguments
+                and later.result.status in {ToolStatus.OK, ToolStatus.PARTIAL}
+                for later in state.tool_observations[index + 1 :]
+            )
+        ]
+        if unresolved_errors:
             return VerificationResult(
                 accepted=False,
                 error_code="TOOL_FAILURE_PRESENT",

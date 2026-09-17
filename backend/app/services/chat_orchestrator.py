@@ -273,6 +273,29 @@ class ChatOrchestrator:
         """
         完整编排：分类 → 路由 → 保存 → 返回 ChatResponse 字典。
         """
+        if self._agent_service is not None:
+            if user_id is None:
+                conversation = db.get(Conversation, conversation_id)
+                if conversation is None:
+                    raise ValueError("conversation does not exist")
+                user_id = conversation.user_id
+            waiting_run_id = self._agent_service.waiting_run_id(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                db=db,
+            )
+            if waiting_run_id:
+                result = self._agent_service.execute(
+                    objective=message,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    request_id=request_id or current_request_id(),
+                    boundary_reason="waiting_task_resume",
+                    resume_run_id=waiting_run_id,
+                    db=db,
+                )
+                self._save_result(db, conversation_id, message, result)
+                return {"conversation_id": conversation_id, **result}
         decision = self._execution_router.decide(message)
         if decision.mode is ExecutionMode.AGENT:
             if self._agent_service is None:

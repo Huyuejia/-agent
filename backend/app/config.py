@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     pi_model: str = "gpt-5-mini"
     pi_runtime_timeout_seconds: float = 60.0
     agent_max_tool_calls: int = 6
+    agent_max_tool_retries: int = 1
+    agent_max_tool_retries: int = 1
 
     # BGE-M3 local model
     bge_model_path: str = "./models/bge_m3"
@@ -127,6 +129,13 @@ class Settings(BaseSettings):
     def _positive_agent_tool_limit(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("Agent tool-call limit must be positive")
+        return value
+
+    @field_validator("agent_max_tool_retries")
+    @classmethod
+    def _nonnegative_agent_tool_retries(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("Agent tool retry limit must not be negative")
         return value
 
     @property

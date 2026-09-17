@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
+import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 
 from sqlalchemy.orm import Session
+from sqlalchemy import func, select
 
 from app.agent.domain import (
     RuntimeResult,
@@ -42,12 +44,25 @@ class AgentTaskService:
         runtime: PiRuntimePort,
         tool_adapter_factory: Callable[[Session], AgentToolAdapter],
         verifier: CandidateVerifier | None = None,
+        max_tool_retries: int = 1,
         max_tool_calls: int = 6,
     ) -> None:
         self._runtime = runtime
         self._tool_adapter_factory = tool_adapter_factory
+        self._max_tool_retries = max_tool_retries
         self._verifier = verifier or CandidateVerifier()
         self._max_tool_calls = max_tool_calls
+
+    def waiting_run_id(self, *, conversation_id: int, user_id: int, db: Session) -> str | None:
+        return db.scalar(
+            select(AgentRun.id)
+            .where(
+                AgentRun.conversation_id == conversation_id,
+                AgentRun.user_id == user_id,
+                AgentRun.status == TaskStatus.WAITING_FOR_USER.value,
+            )
+            .order_by(AgentRun.started_at.desc())
+        )
 
     def execute(
         self,
@@ -58,26 +73,57 @@ class AgentTaskService:
         request_id: str,
         boundary_reason: str,
         db: Session,
+        resume_run_id: str | None = None,
     ) -> dict[str, Any]:
-        run_id = str(uuid.uuid4())
-        state = TaskState(
-            task_id=run_id,
-            conversation_id=conversation_id,
-            objective=objective,
-        )
-        run = AgentRun(
-            id=run_id,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            request_id=request_id or uuid.uuid4().hex,
-            objective=objective,
-            execution_mode="agent",
-            status=state.status.value,
-            task_state=state.model_dump(mode="json"),
-            runtime_version=self._runtime.runtime_version,
-        )
-        db.add(run)
-        sequence = 0
+        if resume_run_id:
+            run = db.scalar(
+                select(AgentRun).where(
+                    AgentRun.id == resume_run_id,
+                    AgentRun.conversation_id == conversation_id,
+                    AgentRun.user_id == user_id,
+                    AgentRun.status == TaskStatus.WAITING_FOR_USER.value,
+                )
+            )
+            if run is None:
+                raise ValueError("resumable agent task does not exist")
+            state = TaskState.model_validate(run.task_state)
+            state.resume_with_user_message(objective)
+            objective = state.objective
+            run.request_id = request_id or uuid.uuid4().hex
+            run.status = state.status.value
+            run.task_state = state.model_dump(mode="json")
+            run.completed_at = None
+            run_id = run.id
+            sequence = db.scalar(
+                select(func.max(AgentTraceEvent.sequence_number)).where(
+                    AgentTraceEvent.run_id == run_id
+                )
+            ) or 0
+        else:
+            active_run_id = self.waiting_run_id(
+                conversation_id=conversation_id, user_id=user_id, db=db
+            )
+            if active_run_id:
+                raise ValueError("waiting agent task must be resumed")
+            run_id = str(uuid.uuid4())
+            state = TaskState(
+                task_id=run_id,
+                conversation_id=conversation_id,
+                objective=objective,
+            )
+            run = AgentRun(
+                id=run_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                request_id=request_id or uuid.uuid4().hex,
+                objective=objective,
+                execution_mode="agent",
+                status=state.status.value,
+                task_state=state.model_dump(mode="json"),
+                runtime_version=self._runtime.runtime_version,
+            )
+            db.add(run)
+            sequence = 0
 
         def trace(
             event_type: str,
@@ -107,18 +153,9 @@ class AgentTaskService:
         tools = self._tool_adapter_factory(db)
         tool_call_count = 0
 
-        def execute_tool(tool_name: str, arguments: dict[str, Any]) -> ToolResult:
-            nonlocal tool_call_count
-            tool_call_count += 1
-            trace("tool_call", {"tool_name": tool_name, "arguments": arguments})
-            if tool_call_count > self._max_tool_calls:
-                result = ToolResult(
-                    status=ToolStatus.ERROR,
-                    error_code="TOOL_CALL_LIMIT_EXCEEDED",
-                    retryable=False,
-                )
-            else:
-                result = tools.execute(tool_name, arguments)
+        def record_observation(
+            tool_name: str, arguments: dict[str, Any], result: ToolResult
+        ) -> None:
             state.observe(tool_name, arguments, result)
             run.task_state = state.model_dump(mode="json")
             trace(
@@ -135,7 +172,44 @@ class AgentTaskService:
                 latency_ms=result.latency_ms,
                 error_code=result.error_code,
             )
-            return result
+
+        def execute_tool(tool_name: str, arguments: dict[str, Any]) -> ToolResult:
+            nonlocal tool_call_count
+            retry_key = f"{tool_name}:{json.dumps(arguments, sort_keys=True)}"
+            retries = 0
+            while True:
+                if tool_call_count >= self._max_tool_calls:
+                    trace(
+                        "tool_call_limit_reached",
+                        {"tool_name": tool_name, "arguments": arguments},
+                        error_code="TOOL_CALL_LIMIT_EXCEEDED",
+                    )
+                    return ToolResult(
+                        status=ToolStatus.ERROR,
+                        error_code="TOOL_CALL_LIMIT_EXCEEDED",
+                        retryable=False,
+                    )
+                tool_call_count += 1
+                trace(
+                    "tool_call",
+                    {"tool_name": tool_name, "arguments": arguments, "attempt": retries + 1},
+                )
+                result = tools.execute(tool_name, arguments)
+                record_observation(tool_name, arguments, result)
+                if (
+                    result.status is not ToolStatus.ERROR
+                    or not result.retryable
+                    or retries >= self._max_tool_retries
+                ):
+                    return result
+                retries += 1
+                state.retry_info[retry_key] = retries
+                run.task_state = state.model_dump(mode="json")
+                trace(
+                    "tool_retry",
+                    {"tool_name": tool_name, "arguments": arguments, "attempt": retries + 1},
+                    error_code=result.error_code,
+                )
 
         try:
             runtime_result = self._runtime.run(
@@ -152,6 +226,36 @@ class AgentTaskService:
                     latency_ms=event.latency_ms,
                     error_code=event.error_code,
                 )
+            if runtime_result.clarification_text:
+                previous = state.status.value
+                state.wait_for_user(
+                    runtime_result.clarification_text,
+                    runtime_result.requested_fields,
+                )
+                run.status = state.status.value
+                run.task_state = state.model_dump(mode="json")
+                trace(
+                    "state_transition",
+                    {
+                        "from": previous,
+                        "to": TaskStatus.WAITING_FOR_USER.value,
+                        "requested_fields": runtime_result.requested_fields,
+                    },
+                )
+                db.commit()
+                return {
+                    "answer": runtime_result.clarification_text,
+                    "intent": "agent_needs_input",
+                    "confidence": 1.0,
+                    "source_type": "agent",
+                    "sources": [],
+                    "handoff_required": False,
+                    "execution_mode": "agent",
+                    "agent_run_id": run_id,
+                    "task_status": state.status.value,
+                    "needs_user_input": True,
+                    "requested_fields": runtime_result.requested_fields,
+                }
             if runtime_result.candidate is None:
                 return self._fail(
                     db,

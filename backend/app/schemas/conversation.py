@@ -41,3 +41,5 @@ class ChatResponse(BaseModel):
     execution_mode: str | None = None
     agent_run_id: str | None = None
     task_status: str | None = None
+    needs_user_input: bool = False
+    requested_fields: list[str] = Field(default_factory=list)

@@ -42,4 +42,5 @@ def create_agent_task_service(retrieval_service) -> AgentTaskService:
         runtime=runtime,
         tool_adapter_factory=tool_factory,
         max_tool_calls=settings.agent_max_tool_calls,
+        max_tool_retries=settings.agent_max_tool_retries,
     )

@@ -62,6 +62,7 @@ class TaskState(BaseModel):
     objective: str
     known_facts: list[dict[str, Any]] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
+    requested_fields: list[str] = Field(default_factory=list)
     completed_steps: list[str] = Field(default_factory=list)
     tool_observations: list[ToolObservation] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
@@ -91,6 +92,21 @@ class TaskState(BaseModel):
             raise ValueError("SUCCEEDED requires application verification")
         self.status = status
 
+    def wait_for_user(self, clarification_text: str, requested_fields: list[str]) -> None:
+        if not clarification_text or not requested_fields:
+            raise ValueError("WAITING_FOR_USER requires clarification and requested fields")
+        self.missing_information = requested_fields
+        self.requested_fields = requested_fields
+        self.transition(TaskStatus.WAITING_FOR_USER)
+
+    def resume_with_user_message(self, message: str) -> None:
+        if self.status is not TaskStatus.WAITING_FOR_USER:
+            raise ValueError("only WAITING_FOR_USER tasks can resume")
+        self.known_facts.append({"source": "user", "text": message})
+        self.missing_information = []
+        self.requested_fields = []
+
+        self.transition(TaskStatus.RUNNING)
 
 class AgentCandidate(BaseModel):
     answer: str = Field(min_length=1)
@@ -110,8 +126,20 @@ class RuntimeEvent(BaseModel):
 
 class RuntimeResult(BaseModel):
     candidate: AgentCandidate | None = None
+    clarification_text: str | None = None
+    requested_fields: list[str] = Field(default_factory=list)
     events: list[RuntimeEvent] = Field(default_factory=list)
     error_code: str | None = None
+
+    @model_validator(mode="after")
+    def _has_one_terminal_result(self) -> "RuntimeResult":
+        if self.candidate is not None:
+            return self
+        if self.clarification_text and self.requested_fields:
+            return self
+        if self.error_code:
+            return self
+        raise ValueError("RuntimeResult requires candidate, clarification, or error")
 
 
 class VerificationResult(BaseModel):

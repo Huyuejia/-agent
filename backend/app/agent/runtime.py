@@ -126,6 +126,12 @@ class SubprocessPiRuntimeClient:
                     )
                     process.stdin.flush()
                 elif message_type == "completed":
+                    if message.get("needsUserInput"):
+                        return RuntimeResult(
+                            clarification_text=message.get("clarificationText"),
+                            requested_fields=message.get("requestedFields") or [],
+                        )
+
                     return RuntimeResult(
                         candidate=AgentCandidate.model_validate(message["candidate"])
                     )

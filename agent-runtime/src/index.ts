@@ -179,7 +179,9 @@ async function main(): Promise<void> {
         "You are a constrained customer-service task runner. Use only the supplied " +
         "read-only tools. Later tool arguments must come from observations when required. " +
         "Return one JSON candidate with answer, intent, confidence, source_type, " +
-        "evidence_refs, and handoff_required. Cite only evidence IDs returned by tools.",
+        "evidence_refs, and handoff_required. If essential information is missing, return " +
+        "needs_user_input, clarification_text, and requested_fields instead. Cite only " +
+        "evidence IDs returned by tools.",
       model,
       thinkingLevel: "off",
       tools,
@@ -202,7 +204,17 @@ async function main(): Promise<void> {
   );
   const last = agent.state.messages[agent.state.messages.length - 1];
   if (!last || last.role !== "assistant") throw new Error("Pi produced no candidate");
-  send({ type: "completed", candidate: parseCandidate(messageText(last)) });
+  const completion = parseCandidate(messageText(last));
+  if (completion.needs_user_input === true) {
+    send({
+      type: "completed",
+      needsUserInput: true,
+      clarificationText: completion.clarification_text,
+      requestedFields: completion.requested_fields,
+    });
+  } else {
+    send({ type: "completed", candidate: completion });
+  }
   scripted?.unregister();
 }
 
