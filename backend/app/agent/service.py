@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 import json
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 
@@ -18,6 +19,7 @@ from app.agent.domain import (
     ToolStatus,
 )
 from app.agent.tools import AgentToolAdapter
+from app.agent.attribution import FailureAttributor
 from app.agent.verification import CandidateVerifier
 from app.models.agent_run import AgentRun, AgentTraceEvent
 from app.models.conversation import Conversation
@@ -117,6 +119,7 @@ class AgentTaskService:
             if run is None:
                 raise ValueError("resumable agent task does not exist")
             state = TaskState.model_validate(run.task_state)
+            previous_status = state.status.value
             state.resume_with_user_message(objective)
             objective = state.objective
             run.request_id = request_id or uuid.uuid4().hex
@@ -154,6 +157,7 @@ class AgentTaskService:
             )
             db.add(run)
             sequence = 0
+            previous_status = None
 
         def trace(
             event_type: str,
@@ -164,23 +168,49 @@ class AgentTaskService:
         ) -> None:
             nonlocal sequence
             sequence += 1
+            event_payload = {
+                "run_id": run_id,
+                "request_id": run.request_id,
+                **(payload or {}),
+            }
             db.add(
                 AgentTraceEvent(
                     run_id=run_id,
                     sequence_number=sequence,
                     event_type=event_type,
-                    payload=payload or {},
+                    payload=event_payload,
                     latency_ms=latency_ms,
                     error_code=error_code,
                 )
             )
 
-        trace("goal_received", {"objective": objective})
+        tools = self._tool_adapter_factory(db)
+        if previous_status is None:
+            trace(
+                "RUN_STARTED",
+                {
+                    "objective": objective,
+                    "task_status_after": state.status.value,
+                    "runtime_version": self._runtime.runtime_version,
+                    "model_identifier": getattr(self._runtime, "model_identifier", None),
+                    "prompt_version": getattr(self._runtime, "prompt_version", None),
+                    "tool_schema_version": self._tool_schema_version(tools.tool_schemas),
+                },
+            )
+        else:
+            trace(
+                "STATE_TRANSITION",
+                {
+                    "from": previous_status,
+                    "to": state.status.value,
+                    "task_status_before": previous_status,
+                    "task_status_after": state.status.value,
+                },
+            )
         trace(
-            "boundary_decision",
+            "BOUNDARY_DECISION",
             {"mode": "agent", "reason_code": boundary_reason},
         )
-        tools = self._tool_adapter_factory(db)
         tool_call_count = 0
 
         def record_observation(
@@ -189,11 +219,11 @@ class AgentTaskService:
             state.observe(tool_name, arguments, result)
             run.task_state = state.model_dump(mode="json")
             trace(
-                "tool_observation",
+                "TOOL_RESULT",
                 {
                     "tool_name": tool_name,
                     "status": result.status.value,
-                    "data": result.data,
+                    "observation_summary": result.data,
                     "evidence_refs": [
                         evidence.evidence_id for evidence in result.evidence
                     ],
@@ -209,19 +239,16 @@ class AgentTaskService:
             retries = 0
             while True:
                 if tool_call_count >= self._max_tool_calls:
-                    trace(
-                        "tool_call_limit_reached",
-                        {"tool_name": tool_name, "arguments": arguments},
-                        error_code="TOOL_CALL_LIMIT_EXCEEDED",
-                    )
-                    return ToolResult(
+                    limit_result = ToolResult(
                         status=ToolStatus.ERROR,
                         error_code="TOOL_CALL_LIMIT_EXCEEDED",
                         retryable=False,
                     )
+                    record_observation(tool_name, arguments, limit_result)
+                    return limit_result
                 tool_call_count += 1
                 trace(
-                    "tool_call",
+                    "TOOL_CALL",
                     {"tool_name": tool_name, "arguments": arguments, "attempt": retries + 1},
                 )
                 result = tools.execute(tool_name, arguments)
@@ -236,10 +263,45 @@ class AgentTaskService:
                 state.retry_info[retry_key] = retries
                 run.task_state = state.model_dump(mode="json")
                 trace(
-                    "tool_retry",
+                    "RETRY",
                     {"tool_name": tool_name, "arguments": arguments, "attempt": retries + 1},
                     error_code=result.error_code,
                 )
+
+        def emit_runtime_event(
+            event_type: str,
+            payload: dict[str, Any] | None = None,
+            *,
+            latency_ms: int | None = None,
+            error_code: str | None = None,
+        ) -> None:
+            for decision in self._model_decisions(event_type, payload or {}):
+                trace(
+                    "MODEL_DECISION",
+                    decision,
+                    latency_ms=latency_ms,
+                    error_code=error_code,
+                )
+
+        def trace_runtime_events(runtime_result: RuntimeResult) -> None:
+            for event in runtime_result.events:
+                emit_runtime_event(
+                    event.event_type,
+                    event.payload,
+                    latency_ms=event.latency_ms,
+                    error_code=event.error_code,
+                )
+
+        def trace_verification_result(candidate, verification) -> None:
+            trace(
+                "VERIFICATION_RESULT",
+                {
+                    "accepted": verification.accepted,
+                    "violations": verification.violations,
+                    "evidence_refs": candidate.evidence_refs,
+                },
+                error_code=verification.error_code,
+            )
 
         try:
             runtime_result = self._runtime.run(
@@ -247,15 +309,9 @@ class AgentTaskService:
                 task_state=state,
                 tool_schemas=tools.tool_schemas,
                 execute_tool=execute_tool,
-                emit_event=trace,
+                emit_event=emit_runtime_event,
             )
-            for event in runtime_result.events:
-                trace(
-                    event.event_type,
-                    event.payload,
-                    latency_ms=event.latency_ms,
-                    error_code=event.error_code,
-                )
+            trace_runtime_events(runtime_result)
             if runtime_result.clarification_text:
                 previous = state.status.value
                 state.wait_for_user(
@@ -265,7 +321,7 @@ class AgentTaskService:
                 run.status = state.status.value
                 run.task_state = state.model_dump(mode="json")
                 trace(
-                    "state_transition",
+                    "STATE_TRANSITION",
                     {
                         "from": previous,
                         "to": TaskStatus.WAITING_FOR_USER.value,
@@ -296,18 +352,58 @@ class AgentTaskService:
                 )
             state.transition(TaskStatus.VERIFYING)
             trace(
-                "state_transition",
+                "STATE_TRANSITION",
                 {"from": "RUNNING", "to": "VERIFYING"},
             )
             verification = self._verifier.verify(runtime_result.candidate, state)
+            trace_verification_result(runtime_result.candidate, verification)
             if not verification.accepted:
-                return self._fail(
-                    db,
-                    run,
-                    state,
-                    trace,
-                    verification.error_code or "VERIFICATION_REJECTED",
+                repair = getattr(self._runtime, "repair", None)
+                if not callable(repair):
+                    return self._fail(
+                        db,
+                        run,
+                        state,
+                        trace,
+                        verification.error_code or "VERIFICATION_REJECTED",
+                    )
+                trace(
+                    "RETRY",
+                    {
+                        "reason": "VERIFICATION_REPAIR",
+                        "violations": verification.violations,
+                        "attempt": 1,
+                    },
+                    error_code=verification.error_code,
                 )
+                repaired_result = repair(
+                    objective=objective,
+                    task_state=state,
+                    tool_schemas=tools.tool_schemas,
+                    execute_tool=execute_tool,
+                    emit_event=emit_runtime_event,
+                    verification=verification,
+                )
+                trace_runtime_events(repaired_result)
+                if repaired_result.candidate is None:
+                    return self._fail(
+                        db,
+                        run,
+                        state,
+                        trace,
+                        repaired_result.error_code or "RUNTIME_NO_CANDIDATE",
+                    )
+                runtime_result = repaired_result
+                verification = self._verifier.verify(runtime_result.candidate, state)
+                trace_verification_result(runtime_result.candidate, verification)
+                if not verification.accepted:
+                    return self._fail(
+                        db,
+                        run,
+                        state,
+                        trace,
+                        verification.error_code or "VERIFICATION_REJECTED",
+                    )
             state.transition(TaskStatus.SUCCEEDED, verified=True)
             candidate = runtime_result.candidate
             run.status = state.status.value
@@ -315,12 +411,12 @@ class AgentTaskService:
             run.final_answer = candidate.answer
             run.completed_at = datetime.now(timezone.utc)
             trace(
-                "state_transition",
+                "STATE_TRANSITION",
                 {"from": "VERIFYING", "to": "SUCCEEDED"},
             )
             trace(
-                "verification_accepted",
-                {"evidence_refs": candidate.evidence_refs},
+                "RUN_COMPLETED",
+                {"task_status_after": "SUCCEEDED", "evidence_refs": candidate.evidence_refs},
             )
             db.commit()
             return {
@@ -349,11 +445,17 @@ class AgentTaskService:
         state.transition(TaskStatus.FAILED)
         run.status = state.status.value
         run.task_state = state.model_dump(mode="json")
-        run.failure_category = error_code
+        failure_category = FailureAttributor().attribute(state, error_code)
+        run.failure_category = failure_category.value
         run.completed_at = datetime.now(timezone.utc)
         trace(
-            "verification_rejected",
-            {"from": previous, "to": "FAILED"},
+            "STATE_TRANSITION",
+            {"from": previous, "to": "FAILED", "task_status_after": "FAILED"},
+            error_code=error_code,
+        )
+        trace(
+            "RUN_COMPLETED",
+            {"task_status_after": "FAILED", "failure_category": failure_category.value},
             error_code=error_code,
         )
         db.commit()
@@ -370,7 +472,33 @@ class AgentTaskService:
             "execution_mode": "agent",
             "agent_run_id": run.id,
             "task_status": state.status.value,
+            "failure_category": failure_category.value,
         }
+
+    @staticmethod
+    def _tool_schema_version(tool_schemas: dict[str, dict[str, Any]]) -> str:
+        serialized = json.dumps(tool_schemas, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _model_decisions(event_type: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        if event_type == "MODEL_DECISION":
+            decision = payload.get("decision")
+            if decision in {"CALL_TOOL", "ASK_USER", "FINALIZE"}:
+                return [{key: value for key, value in payload.items() if key != "reasoning"}]
+            return []
+        if event_type == "model_action":
+            action = payload.get("action")
+            if isinstance(action, str):
+                return [{"decision": "CALL_TOOL", "tool_name": action}]
+            actions = payload.get("actions")
+            if isinstance(actions, list):
+                return [
+                    {"decision": "CALL_TOOL", "tool_name": action["toolName"]}
+                    for action in actions
+                    if isinstance(action, dict) and isinstance(action.get("toolName"), str)
+                ]
+        return []
 
     @staticmethod
     def _message_sources(

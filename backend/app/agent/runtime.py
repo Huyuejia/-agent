@@ -14,10 +14,12 @@ from app.agent.domain import (
     RuntimeResult,
     TaskState,
     ToolResult,
+    VerificationResult,
 )
 
 
 PI_RUNTIME_VERSION = "@earendil-works/pi-agent-core@0.85.1"
+PROMPT_VERSION = "agent-v2-completion-v1"
 
 
 class PiRuntimeError(RuntimeError):
@@ -41,6 +43,8 @@ class SubprocessPiRuntimeClient:
         self._model = model
         self._timeout_seconds = timeout_seconds
         self._scripted_scenario = scripted_scenario
+        self.model_identifier = f"{provider}/{model}"
+        self.prompt_version = PROMPT_VERSION
 
     def run(
         self,
@@ -50,6 +54,47 @@ class SubprocessPiRuntimeClient:
         tool_schemas: dict[str, dict[str, Any]],
         execute_tool: Callable[[str, dict[str, Any]], ToolResult],
         emit_event: Callable[..., None],
+    ) -> RuntimeResult:
+        return self._run(
+            objective=objective,
+            task_state=task_state,
+            tool_schemas=tool_schemas,
+            execute_tool=execute_tool,
+            emit_event=emit_event,
+            verification_feedback=None,
+        )
+
+    def repair(
+        self,
+        *,
+        objective: str,
+        task_state: TaskState,
+        tool_schemas: dict[str, dict[str, Any]],
+        execute_tool: Callable[[str, dict[str, Any]], ToolResult],
+        emit_event: Callable[..., None],
+        verification: VerificationResult,
+    ) -> RuntimeResult:
+        return self._run(
+            objective=objective,
+            task_state=task_state,
+            tool_schemas=tool_schemas,
+            execute_tool=execute_tool,
+            emit_event=emit_event,
+            verification_feedback={
+                "error_code": verification.error_code,
+                "violations": verification.violations,
+            },
+        )
+
+    def _run(
+        self,
+        *,
+        objective: str,
+        task_state: TaskState,
+        tool_schemas: dict[str, dict[str, Any]],
+        execute_tool: Callable[[str, dict[str, Any]], ToolResult],
+        emit_event: Callable[..., None],
+        verification_feedback: dict[str, Any] | None,
     ) -> RuntimeResult:
         adapter_dir = Path(__file__).resolve().parents[3] / "agent-runtime"
         try:
@@ -79,6 +124,7 @@ class SubprocessPiRuntimeClient:
             "provider": self._provider,
             "model": self._model,
             "scriptedScenario": self._scripted_scenario,
+            "verificationFeedback": verification_feedback,
         }
         process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
         process.stdin.flush()

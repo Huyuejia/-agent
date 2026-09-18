@@ -151,8 +151,13 @@ def test_agent_service_persists_verified_state_and_ordered_trace():
     assert [event.sequence_number for event in events] == list(
         range(1, len(events) + 1)
     )
-    assert [event.event_type for event in events].count("tool_observation") == 2
-    assert events[-1].event_type == "verification_accepted"
+    event_types = [event.event_type for event in events]
+    assert event_types.count("TOOL_RESULT") == 2
+    assert {"RUN_STARTED", "BOUNDARY_DECISION", "MODEL_DECISION", "TOOL_CALL", "TOOL_RESULT", "STATE_TRANSITION", "VERIFICATION_RESULT", "RUN_COMPLETED"}.issubset(event_types)
+    assert events[-1].event_type == "RUN_COMPLETED"
+    assert events[0].payload["run_id"] == run.id
+    assert events[0].payload["request_id"] == "request-1"
+    assert events[0].payload["tool_schema_version"]
 
 
 class UnsupportedCandidateRuntime:
@@ -197,4 +202,4 @@ def test_agent_cannot_mark_run_succeeded_with_fabricated_evidence():
     assert result["task_status"] == "FAILED"
     assert result["handoff_required"] is True
     run = db.get(AgentRun, result["agent_run_id"])
-    assert run.failure_category == "UNOBSERVED_EVIDENCE"
+    assert run.failure_category == "VERIFICATION"

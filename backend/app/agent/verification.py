@@ -12,12 +12,20 @@ class CandidateVerifier:
         if not candidate.answer.strip() or not candidate.evidence_refs:
             return VerificationResult(
                 accepted=False,
-                error_code="INCOMPLETE_CANDIDATE",
+                error_code="EVIDENCE_REQUIRED",
+                violations=["EVIDENCE_REQUIRED"],
             )
         if not set(candidate.evidence_refs).issubset(state.evidence_refs):
             return VerificationResult(
                 accepted=False,
                 error_code="UNOBSERVED_EVIDENCE",
+                violations=["UNOBSERVED_EVIDENCE"],
+            )
+        if state.missing_information:
+            return VerificationResult(
+                accepted=False,
+                error_code="MISSING_INFORMATION",
+                violations=["MISSING_INFORMATION"],
             )
         unresolved_errors = [
             observation
@@ -34,5 +42,6 @@ class CandidateVerifier:
             return VerificationResult(
                 accepted=False,
                 error_code="TOOL_FAILURE_PRESENT",
+                violations=["TOOL_FAILURE_PRESENT"],
             )
         return VerificationResult(accepted=True)

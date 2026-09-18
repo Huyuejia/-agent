@@ -21,6 +21,7 @@ type RunRequest = {
   provider: string;
   model: string;
   scriptedScenario?: string | null;
+  verificationFeedback?: JsonObject | null;
 };
 
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -192,15 +193,27 @@ async function main(): Promise<void> {
       const actions = event.message.content
         .filter((block) => block.type === "toolCall")
         .map((block) => ({ toolName: block.name, arguments: block.arguments }));
-      send({
-        type: "runtime_event",
-        eventType: "model_action",
-        payload: { actions, hasCandidateText: messageText(event.message).length > 0 },
-      });
+      for (const action of actions) {
+        send({
+          type: "runtime_event",
+          eventType: "MODEL_DECISION",
+          payload: { decision: "CALL_TOOL", tool_name: action.toolName, arguments: action.arguments },
+        });
+      }
+      if (actions.length === 0 && messageText(event.message).length > 0) {
+        send({
+          type: "runtime_event",
+          eventType: "MODEL_DECISION",
+          payload: { decision: "FINALIZE" },
+        });
+      }
     }
   });
+  const verificationFeedback = request.verificationFeedback
+    ? `\nVerification feedback: ${JSON.stringify(request.verificationFeedback)}\nRepair the candidate using only TaskState evidence and return the required JSON protocol.`
+    : "";
   await agent.prompt(
-    `Objective: ${request.objective}\nTaskState: ${JSON.stringify(request.taskState)}`,
+    `Objective: ${request.objective}\nTaskState: ${JSON.stringify(request.taskState)}${verificationFeedback}`,
   );
   const last = agent.state.messages[agent.state.messages.length - 1];
   if (!last || last.role !== "assistant") throw new Error("Pi produced no candidate");

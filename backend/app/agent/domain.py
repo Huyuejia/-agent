@@ -30,6 +30,18 @@ class ToolStatus(str, Enum):
     ERROR = "ERROR"
 
 
+class FailureCategory(str, Enum):
+    TASK_UNDERSTANDING = "TASK_UNDERSTANDING"
+    NEXT_ACTION = "NEXT_ACTION"
+    WRONG_TOOL = "WRONG_TOOL"
+    WRONG_TOOL_ARGS = "WRONG_TOOL_ARGS"
+    TOOL_OR_RETRIEVAL = "TOOL_OR_RETRIEVAL"
+    STATE_LOSS = "STATE_LOSS"
+    VERIFICATION = "VERIFICATION"
+    FINAL_ANSWER = "FINAL_ANSWER"
+    UNATTRIBUTED = "UNATTRIBUTED"
+
+
 class ExecutionDecision(BaseModel):
     mode: ExecutionMode
     reason_code: str
@@ -113,7 +125,7 @@ class AgentCandidate(BaseModel):
     intent: str = "agent_dynamic_task"
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     source_type: str
-    evidence_refs: list[str] = Field(min_length=1)
+    evidence_refs: list[str] = Field(default_factory=list)
     handoff_required: bool = False
 
 
@@ -145,3 +157,4 @@ class RuntimeResult(BaseModel):
 class VerificationResult(BaseModel):
     accepted: bool
     error_code: str | None = None
+    violations: list[str] = Field(default_factory=list)
