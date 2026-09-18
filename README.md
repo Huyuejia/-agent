@@ -114,6 +114,27 @@ backend/.venv/bin/python scripts/evaluate_retrieval_routing.py
 
 当前 ranking 指标实现位于 `backend/app/evaluation/metrics.py`；扩充多文档相关性标注后再报告 Recall@k/MRR。
 
+## Workflow/Agent Eval Harness
+
+版本控制案例位于 `evaluation/agent_v2_eval_cases.jsonl`。无模型凭据的确定性 lane 仅验证 Harness、fixture、grader 和 JSONL 输出：
+
+```bash
+cd backend
+.venv/bin/python -m app.evaluation.run_harness \
+  --cases ../evaluation/agent_v2_eval_cases.jsonl \
+  --executor-factory app.evaluation.fixture_runner:build_deterministic_runner \
+  --output /tmp/agent-v2-eval-results.jsonl
+```
+
+真实 Workflow/Agent/auto 比较通过同一个命令接入显式的 `module_path:callable_name` executor factory。该 factory 必须为三种模式提供相同 fixture、用户输入、Tool Adapter 和故障注入；只有该运行 lane 需要本地服务和模型凭据。凭据不写入 EvalCase，也不需要外部 Eval 平台或 UI。
+
+确定性单元测试不调用模型或外部服务：
+
+```bash
+cd backend
+.venv/bin/python -m pytest tests/test_eval_harness.py -q
+```
+
 ## CI 与 PR
 
 仓库通过 GitHub Actions 在每个 Pull Request 上并行执行：
