@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Callable
 
-from app.evaluation.harness import EvalRunner, load_cases
+from app.evaluation.harness import EvalRunner, load_cases, summarize_results
 
 
 def _load_runner(factory_path: str) -> EvalRunner:
@@ -35,10 +35,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="module_path:callable_name returning an EvalRunner",
     )
     parser.add_argument("--output", type=Path, required=True, help="result JSONL path")
+    parser.add_argument(
+        "--regression-cases",
+        type=Path,
+        help="optional independent runtime_badcase or manual_regression JSONL path",
+    )
+    parser.add_argument("--report", type=Path, help="optional metrics report JSON path")
     args = parser.parse_args(argv)
 
     runner = _load_runner(args.executor_factory)
-    results = runner.run_cases(load_cases(args.cases))
+    cases = load_cases(args.cases)
+    if args.regression_cases:
+        cases.extend(load_cases(args.regression_cases))
+    results = runner.run_cases(cases)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         "".join(
@@ -47,6 +56,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         encoding="utf-8",
     )
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(
+            json.dumps(
+                summarize_results(cases, results).model_dump(mode="json"),
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     return 0 if all(result.success for result in results) else 1
 
 

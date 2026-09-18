@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+from collections import Counter, defaultdict
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.agent.domain import FailureCategory, TaskStatus, ToolResult, ToolStatus
 
@@ -18,6 +19,13 @@ class FaultInjection(BaseModel):
 
     kind: Literal["retryable_error_first", "not_found_first"]
     tool_name: str | None = None
+
+
+class RequiredToolCall(BaseModel):
+    """A tool call whose arguments are material to a particular EvalCase."""
+
+    tool_name: str = Field(min_length=1)
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class EvalCase(BaseModel):
@@ -36,8 +44,19 @@ class EvalCase(BaseModel):
     fault_injection: FaultInjection | None = None
     max_tool_calls: int = Field(default=6, gt=0)
     max_tool_retries: int = Field(default=1, ge=0)
+    min_tool_retries: int = Field(default=0, ge=0)
+    required_tool_calls: list[RequiredToolCall] = Field(default_factory=list)
+    min_verification_rejections: int = Field(default=0, ge=0)
+    source: Literal["seed", "runtime_badcase", "manual_regression"] = "seed"
+    badcase_trace_ref: str | None = None
     fixture: dict[str, Any] = Field(default_factory=dict)
     requires_verification: bool = True
+
+    @model_validator(mode="after")
+    def _regression_cases_have_a_recorded_trace(self) -> "EvalCase":
+        if self.source != "seed" and not self.badcase_trace_ref:
+            raise ValueError("regression EvalCase requires badcase_trace_ref")
+        return self
 
 
 class EvalEvent(BaseModel):
@@ -83,6 +102,7 @@ class ExecutionResult(BaseModel):
     needs_user_input: bool = False
     requested_fields: list[str] = Field(default_factory=list)
     verification_executed: bool = False
+    verification_rejection_count: int = Field(default=0, ge=0)
     supported: bool = True
     events: list[EvalEvent] = Field(default_factory=list)
 
@@ -109,6 +129,9 @@ class EvalResult(BaseModel):
     execution_mode: Literal["workflow", "agent"]
     grader_details: dict[str, GraderDetail]
     success: bool
+    tool_call_count: int = Field(default=0, ge=0)
+    tool_retry_count: int = Field(default=0, ge=0)
+    verification_rejection_count: int = Field(default=0, ge=0)
     trace_refs: list[str] = Field(default_factory=list)
     failure_category: FailureCategory | None = None
     events: list[EvalEvent] = Field(default_factory=list)
@@ -212,6 +235,10 @@ class EvalRunner:
             )
         final = executions[-1]
         calls = adapter.tool_calls if adapter is not None else []
+        retries = self._retry_count(calls)
+        verification_rejections = sum(
+            execution.verification_rejection_count for execution in executions
+        )
         details = self._grade(case, mode, executions, calls)
         success = all(detail.passed for detail in details.values())
         events = [event for execution in executions for event in execution.events]
@@ -225,6 +252,9 @@ class EvalRunner:
                     "execution_mode": final.execution_mode,
                     "success": success,
                     "failure_category": final.failure_category,
+                    "tool_call_count": len(calls),
+                    "tool_retry_count": retries,
+                    "verification_rejection_count": verification_rejections,
                 },
             )
         )
@@ -235,6 +265,9 @@ class EvalRunner:
             execution_mode=final.execution_mode,
             grader_details=details,
             success=success,
+            tool_call_count=len(calls),
+            tool_retry_count=retries,
+            verification_rejection_count=verification_rejections,
             trace_refs=[
                 execution.trace_ref for execution in executions if execution.trace_ref
             ],
@@ -273,6 +306,15 @@ class EvalRunner:
             set(case.forbidden_capabilities) & observed_capabilities
         )
         retries = self._retry_count(calls)
+        missing_tool_calls = [
+            expected
+            for expected in case.required_tool_calls
+            if not any(
+                call.tool_name == expected.tool_name
+                and call.arguments == expected.arguments
+                for call in calls
+            )
+        ]
         clarification_ok = (
             not case.expected_requested_fields
             or (
@@ -310,9 +352,31 @@ class EvalRunner:
                 passed=len(calls) <= case.max_tool_calls and retries <= case.max_tool_retries,
                 message=f"tool_calls={len(calls)}, retries={retries}",
             ),
+            "process_required_retries": GraderDetail(
+                passed=retries >= case.min_tool_retries,
+                message=f"required_retries={case.min_tool_retries}, got={retries}",
+            ),
+            "process_tool_arguments": GraderDetail(
+                passed=not missing_tool_calls,
+                message=(
+                    "required tool arguments matched"
+                    if not missing_tool_calls
+                    else f"missing required tool calls: {missing_tool_calls}"
+                ),
+            ),
             "process_verification": GraderDetail(
                 passed=not case.requires_verification or final.verification_executed,
                 message="verification executed" if final.verification_executed else "verification missing",
+            ),
+            "process_verification_rejections": GraderDetail(
+                passed=sum(
+                    execution.verification_rejection_count for execution in executions
+                )
+                >= case.min_verification_rejections,
+                message=(
+                    f"required_verification_rejections={case.min_verification_rejections}, "
+                    f"got={sum(execution.verification_rejection_count for execution in executions)}"
+                ),
             ),
         }
         expected_mode = (
@@ -339,6 +403,112 @@ class EvalRunner:
                 retries += 1
             previous = call
         return retries
+
+
+class EvalDiagnostics(BaseModel):
+    slice_success_rates: dict[str, float]
+    failure_attribution_counts: dict[str, int]
+    verification_rejection_count: int
+    tool_retry_count: int
+    tool_call_count: int
+
+
+class EvalSummary(BaseModel):
+    seed_case_count: int
+    regression_case_count: int
+    workflow_complex_task_success_rate: float
+    agent_complex_task_success_rate: float
+    boundary_accuracy: float
+    simple_over_agentization_rate: float
+    agent_complex_task_improvement_supported: bool
+    agent_complex_task_hypothesis: str
+    diagnostics: EvalDiagnostics
+    regression_success_rate: float
+
+
+def summarize_results(cases: list[EvalCase], results: list[EvalResult]) -> EvalSummary:
+    """Report comparable execution metrics from one full, versioned Eval run."""
+
+    case_by_id = {case.case_id: case for case in cases}
+    if len(case_by_id) != len(cases):
+        raise ValueError("EvalCase ids must be unique within a report")
+    if any(result.case_id not in case_by_id for result in results):
+        raise ValueError("result references an unknown EvalCase")
+
+    def selected(predicate: Callable[[EvalCase, EvalResult], bool]) -> list[EvalResult]:
+        return [result for result in results if predicate(case_by_id[result.case_id], result)]
+
+    def success_rate(items: list[EvalResult]) -> float:
+        return sum(result.success for result in items) / len(items) if items else 0.0
+
+    seed_cases = [case for case in cases if case.source == "seed"]
+    regression_cases = [case for case in cases if case.source != "seed"]
+    workflow_complex = selected(
+        lambda case, result: case.source == "seed"
+        and case.complex_task
+        and result.requested_mode == "workflow"
+    )
+    agent_complex = selected(
+        lambda case, result: case.source == "seed"
+        and case.complex_task
+        and result.requested_mode == "agent"
+    )
+    boundary_results = selected(
+        lambda case, result: case.source == "seed"
+        and case.slice == "boundary"
+        and result.requested_mode == "auto"
+    )
+    simple_auto = selected(
+        lambda case, result: case.source == "seed"
+        and case.slice == "simple-deterministic"
+        and result.requested_mode == "auto"
+    )
+    slice_results: dict[str, list[EvalResult]] = defaultdict(list)
+    for result in results:
+        slice_results[case_by_id[result.case_id].slice].append(result)
+    failures = Counter(
+        result.failure_category.value
+        for result in results
+        if result.failure_category is not None
+    )
+    workflow_rate = success_rate(workflow_complex)
+    agent_rate = success_rate(agent_complex)
+    improvement_supported = agent_rate > workflow_rate
+
+    return EvalSummary(
+        seed_case_count=len(seed_cases),
+        regression_case_count=len(regression_cases),
+        workflow_complex_task_success_rate=workflow_rate,
+        agent_complex_task_success_rate=agent_rate,
+        boundary_accuracy=success_rate(boundary_results),
+        simple_over_agentization_rate=(
+            sum(result.execution_mode == "agent" for result in simple_auto)
+            / len(simple_auto)
+            if simple_auto
+            else 0.0
+        ),
+        agent_complex_task_improvement_supported=improvement_supported,
+        agent_complex_task_hypothesis=(
+            "supported: Agent complex-task success rate is higher than Workflow"
+            if improvement_supported
+            else "not validated: Agent complex-task success rate is not higher than Workflow"
+        ),
+        diagnostics=EvalDiagnostics(
+            slice_success_rates={
+                slice_name: success_rate(slice_items)
+                for slice_name, slice_items in sorted(slice_results.items())
+            },
+            failure_attribution_counts=dict(sorted(failures.items())),
+            verification_rejection_count=sum(
+                result.verification_rejection_count for result in results
+            ),
+            tool_retry_count=sum(result.tool_retry_count for result in results),
+            tool_call_count=sum(result.tool_call_count for result in results),
+        ),
+        regression_success_rate=success_rate(
+            selected(lambda case, _result: case.source != "seed")
+        ),
+    )
 
 
 def load_cases(path: Path | str) -> list[EvalCase]:

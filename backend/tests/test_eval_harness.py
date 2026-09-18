@@ -1,5 +1,8 @@
 import json
+from pathlib import Path
+
 from app.evaluation.harness import EvalCase, EvalRunner, ExecutionResult, load_cases
+from app.evaluation.fixture_runner import build_deterministic_runner
 
 class RecordingExecutor:
     def __init__(self, execution_mode):
@@ -302,3 +305,87 @@ def test_forced_modes_fail_when_executor_reports_the_other_execution_mode():
     assert results[0].success is False
     assert results[1].grader_details["boundary"].passed is True
     assert results[2].grader_details["boundary"].passed is True
+
+
+def test_versioned_seed_and_regression_sets_report_spec_metrics(tmp_path):
+    repository_root = Path(__file__).resolve().parents[2]
+    seed_cases = load_cases(repository_root / "evaluation/agent_v2_seed_cases.jsonl")
+    regression_cases = load_cases(
+        repository_root / "evaluation/agent_v2_regression_cases.jsonl"
+    )
+    report_path = tmp_path / "report.json"
+    results_path = tmp_path / "results.jsonl"
+
+    exit_code = main(
+        [
+            "--cases",
+            str(repository_root / "evaluation/agent_v2_seed_cases.jsonl"),
+            "--regression-cases",
+            str(repository_root / "evaluation/agent_v2_regression_cases.jsonl"),
+            "--executor-factory",
+            "app.evaluation.fixture_runner:build_deterministic_runner",
+            "--output",
+            str(results_path),
+            "--report",
+            str(report_path),
+        ]
+    )
+
+    distribution = {}
+    for case in seed_cases:
+        distribution[case.slice] = distribution.get(case.slice, 0) + 1
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert len(seed_cases) == 24
+    assert distribution == {
+        "simple-deterministic": 4,
+        "boundary": 4,
+        "complex-dynamic-path": 6,
+        "missing-information": 4,
+        "tool-retrieval-failure": 3,
+        "verification": 3,
+    }
+    assert {case.source for case in regression_cases} == {"runtime_badcase"}
+    assert report["seed_case_count"] == 24
+    assert report["regression_case_count"] == 1
+    assert report["workflow_complex_task_success_rate"] == 1.0
+    assert report["agent_complex_task_success_rate"] == 1.0
+    assert report["boundary_accuracy"] == 1.0
+    assert report["simple_over_agentization_rate"] == 0.0
+    assert report["agent_complex_task_improvement_supported"] is False
+    assert report["agent_complex_task_hypothesis"].startswith("not validated:")
+    assert report["diagnostics"]["tool_retry_count"] >= 6
+    assert report["diagnostics"]["verification_rejection_count"] >= 9
+    assert report["diagnostics"]["tool_call_count"] > 0
+    assert all(
+        json.loads(result)["success"]
+        for result in results_path.read_text(encoding="utf-8").splitlines()
+    )
+
+
+def test_dynamic_observation_case_and_retry_badcase_are_process_graded():
+    repository_root = Path(__file__).resolve().parents[2]
+    seed_cases = load_cases(repository_root / "evaluation/agent_v2_seed_cases.jsonl")
+    regression_case = load_cases(
+        repository_root / "evaluation/agent_v2_regression_cases.jsonl"
+    )[0]
+    runner = build_deterministic_runner()
+    dynamic_case = next(
+        case for case in seed_cases if case.case_id == "complex-observation-warranty-001"
+    )
+
+    dynamic_results = runner.run_case(dynamic_case)
+    regression_results = runner.run_case(regression_case)
+
+    assert all(
+        result.grader_details["process_tool_arguments"].passed
+        for result in dynamic_results
+    )
+    assert all(result.tool_call_count == 2 for result in dynamic_results)
+    assert all(result.success for result in regression_results)
+    assert all(result.tool_retry_count == 1 for result in regression_results)
+    assert all(
+        result.grader_details["process_required_retries"].passed
+        for result in regression_results
+    )
