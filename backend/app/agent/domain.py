@@ -111,13 +111,25 @@ class TaskState(BaseModel):
         self.requested_fields = requested_fields
         self.transition(TaskStatus.WAITING_FOR_USER)
 
-    def resume_with_user_message(self, message: str) -> None:
+    def resume_with_user_message(
+        self,
+        message: str,
+        structured_fields: dict[str, str] | None = None,
+    ) -> None:
         if self.status is not TaskStatus.WAITING_FOR_USER:
             raise ValueError("only WAITING_FOR_USER tasks can resume")
-        self.known_facts.append({"source": "user", "text": message})
+        expected_fields = set(self.requested_fields)
+        if structured_fields is None:
+            if len(self.requested_fields) != 1:
+                raise ValueError("multi-field resume requires structured fields")
+            structured_fields = {self.requested_fields[0]: message}
+        if set(structured_fields) != expected_fields:
+            raise ValueError("resume fields must match requested_fields")
+        self.known_facts.append(
+            {"source": "user", "fields": dict(structured_fields)}
+        )
         self.missing_information = []
         self.requested_fields = []
-
         self.transition(TaskStatus.RUNNING)
 
 class AgentCandidate(BaseModel):

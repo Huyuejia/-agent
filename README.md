@@ -118,21 +118,21 @@ backend/.venv/bin/python scripts/evaluate_retrieval_routing.py
 
 版本化 seed cases 位于 `evaluation/agent_v2_seed_cases.jsonl`，包含 24 个虚构数据案例：Simple deterministic、Boundary、Complex dynamic path、Missing information、Tool/retrieval failure 与 Verification。独立的 `evaluation/agent_v2_regression_cases.jsonl` 只收录实际复现的 `runtime_badcase` 或 `manual_regression`；每个此类案例都必须链接已记录的失败 Trace，不能通过改写 expected outcome 静默规避回归。
 
-无模型凭据的确定性 lane 使用相同 fixture、输入与故障注入，强制执行 Workflow、Agent 与 auto 三种模式，并输出逐例结果和指标报告：
+无模型凭据的确定性 lane 通过真实 ChatOrchestrator、AgentTaskService 与生产 ExecutionRouter 执行 Workflow、Agent 和 auto 三种模式；fixture 只提供业务/Tool 数据与故障注入，外部模型边界使用可复现的 Eval runtime。运行后输出逐例真实 trace 与指标报告：
 
 ```bash
 cd backend
 .venv/bin/python -m app.evaluation.run_harness \
   --cases ../evaluation/agent_v2_seed_cases.jsonl \
   --regression-cases ../evaluation/agent_v2_regression_cases.jsonl \
-  --executor-factory app.evaluation.fixture_runner:build_deterministic_runner \
+  --executor-factory app.evaluation.production_runner:build_production_runner \
   --output /tmp/agent-v2-eval-results.jsonl \
   --report /tmp/agent-v2-eval-report.json
 ```
 
-报告汇总 Workflow/Agent Complex Task Success Rate、Boundary Accuracy、Simple Over-Agentization Rate，以及按 slice 成功率、failure attribution、verification rejection、retry 与 Tool-call 计数。`agent_complex_task_hypothesis` 只有在预声明复杂 slice 的 Agent CTSR 严格高于 Workflow CTSR 时才标记为 `supported`；否则明确为 `not validated`。延迟可由 Trace 单独分析，不作为主指标。
+报告汇总 Workflow/Agent Complex Task Success Rate、Boundary Slice Accuracy、Auto Routing Accuracy、Simple Over-Agentization Rate，以及按 slice 成功率、failure attribution、verification rejection、retry 与 Tool-call 计数。`agent_complex_task_hypothesis` 只有在预声明复杂 slice 的 Agent CTSR 严格高于 Workflow CTSR 时才标记为 `supported`；否则明确为 `not validated`。延迟可由 Trace 单独分析，不作为主指标。
 
-真实 Workflow/Agent/auto 比较通过同一个命令接入显式的 `module_path:callable_name` executor factory。该 factory 必须为三种模式提供相同 fixture、用户输入、Tool Adapter 和故障注入；只有该运行 lane 需要本地服务和模型凭据。凭据不写入 EvalCase，也不需要外部 Eval 平台或 UI。
+该 production executor 为三种模式提供相同业务 fixture、用户输入、Tool Adapter 与故障注入。forced Workflow 与 forced Agent 进入不同生产执行分支，auto 则调用生产 ExecutionRouter；EvalCase 不包含最终答案、执行模式、verification 结论、failure category 或 supported 标志。
 
 确定性单元测试不调用模型或外部服务：
 

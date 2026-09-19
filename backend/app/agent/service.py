@@ -49,12 +49,14 @@ class AgentTaskService:
         verifier: CandidateVerifier | None = None,
         max_tool_retries: int = 1,
         max_tool_calls: int = 6,
+        max_verification_repairs: int = 1,
     ) -> None:
         self._runtime = runtime
         self._tool_adapter_factory = tool_adapter_factory
         self._max_tool_retries = max_tool_retries
         self._verifier = verifier or CandidateVerifier()
         self._max_tool_calls = max_tool_calls
+        self._max_verification_repairs = max_verification_repairs
 
     def waiting_run_id(self, *, conversation_id: int, user_id: int, db: Session) -> str | None:
         return db.scalar(
@@ -105,6 +107,7 @@ class AgentTaskService:
         boundary_reason: str,
         db: Session,
         resume_run_id: str | None = None,
+        resume_fields: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         self._lock_conversation(conversation_id=conversation_id, user_id=user_id, db=db)
         if resume_run_id:
@@ -120,7 +123,7 @@ class AgentTaskService:
                 raise ValueError("resumable agent task does not exist")
             state = TaskState.model_validate(run.task_state)
             previous_status = state.status.value
-            state.resume_with_user_message(objective)
+            state.resume_with_user_message(objective, resume_fields)
             objective = state.objective
             run.request_id = request_id or uuid.uuid4().hex
             run.status = state.status.value
@@ -268,6 +271,8 @@ class AgentTaskService:
                     error_code=result.error_code,
                 )
 
+        ask_user_traced = False
+
         def emit_runtime_event(
             event_type: str,
             payload: dict[str, Any] | None = None,
@@ -275,7 +280,10 @@ class AgentTaskService:
             latency_ms: int | None = None,
             error_code: str | None = None,
         ) -> None:
+            nonlocal ask_user_traced
             for decision in self._model_decisions(event_type, payload or {}):
+                if decision.get("decision") == "ASK_USER":
+                    ask_user_traced = True
                 trace(
                     "MODEL_DECISION",
                     decision,
@@ -314,6 +322,14 @@ class AgentTaskService:
             trace_runtime_events(runtime_result)
             if runtime_result.clarification_text:
                 previous = state.status.value
+                if not ask_user_traced:
+                    trace(
+                        "MODEL_DECISION",
+                        {
+                            "decision": "ASK_USER",
+                            "requested_fields": runtime_result.requested_fields,
+                        },
+                    )
                 state.wait_for_user(
                     runtime_result.clarification_text,
                     runtime_result.requested_fields,
@@ -357,9 +373,13 @@ class AgentTaskService:
             )
             verification = self._verifier.verify(runtime_result.candidate, state)
             trace_verification_result(runtime_result.candidate, verification)
-            if not verification.accepted:
+            repair_attempt = 0
+            while not verification.accepted:
                 repair = getattr(self._runtime, "repair", None)
-                if not callable(repair):
+                if (
+                    repair_attempt >= self._max_verification_repairs
+                    or not callable(repair)
+                ):
                     return self._fail(
                         db,
                         run,
@@ -367,12 +387,13 @@ class AgentTaskService:
                         trace,
                         verification.error_code or "VERIFICATION_REJECTED",
                     )
+                repair_attempt += 1
                 trace(
                     "RETRY",
                     {
                         "reason": "VERIFICATION_REPAIR",
                         "violations": verification.violations,
-                        "attempt": 1,
+                        "attempt": repair_attempt,
                     },
                     error_code=verification.error_code,
                 )
@@ -396,14 +417,6 @@ class AgentTaskService:
                 runtime_result = repaired_result
                 verification = self._verifier.verify(runtime_result.candidate, state)
                 trace_verification_result(runtime_result.candidate, verification)
-                if not verification.accepted:
-                    return self._fail(
-                        db,
-                        run,
-                        state,
-                        trace,
-                        verification.error_code or "VERIFICATION_REJECTED",
-                    )
             state.transition(TaskStatus.SUCCEEDED, verified=True)
             candidate = runtime_result.candidate
             run.status = state.status.value

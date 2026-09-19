@@ -129,7 +129,7 @@ def test_chat_endpoint_resumes_waiting_task_before_new_routing_decision():
     try:
         run = db.get(AgentRun, resumed_body["agent_run_id"])
         assert run.objective == "先查出错误码 E1001 对应的产品，再告诉我保修政策"
-        assert run.task_state["known_facts"] == [{"source": "user", "text": "Cam-A1"}]
+        assert run.task_state["known_facts"] == [{"source": "user", "fields": {"product_name": "Cam-A1"}}]
         messages = db.scalars(
             select(Message)
             .where(Message.conversation_id == conversation_id)

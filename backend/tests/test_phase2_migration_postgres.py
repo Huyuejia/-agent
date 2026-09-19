@@ -91,7 +91,7 @@ def test_0003_to_0004_preserves_conversations_and_messages():
                 )
             ).mappings().all()
 
-        assert revision == "0004"
+        assert revision == "0005"
         assert [row["id"] for row in users] == [71001, 71002]
         assert [row["normalized_email"] for row in users] == [
             "legacy-71001@local.invalid",

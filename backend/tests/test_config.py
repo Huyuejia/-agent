@@ -39,6 +39,10 @@ def test_redis_timeout_defaults_and_boundary_validation() -> None:
     configured = Settings(_env_file=None)
     assert configured.redis_connect_timeout_seconds == 2.0
     assert configured.redis_socket_timeout_seconds == 2.0
+    assert configured.agent_max_verification_repairs == 1
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, agent_max_verification_repairs=-1)
 
 
 

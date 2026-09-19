@@ -99,7 +99,7 @@ def _vec(value: float, index: int) -> list[float]:
 def test_alembic_upgrade_reaches_current_head(migrated):
     with migrated.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    assert version == "0004"
+    assert version == "0005"
 
 
 def test_embedding_column_is_vector_1024(migrated):

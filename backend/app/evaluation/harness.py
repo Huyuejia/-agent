@@ -8,8 +8,9 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, Protocol
+from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agent.domain import FailureCategory, TaskStatus, ToolResult, ToolStatus
 
@@ -26,6 +27,21 @@ class RequiredToolCall(BaseModel):
 
     tool_name: str = Field(min_length=1)
     arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class FixtureToolResult(BaseModel):
+    """Business/tool data available to every execution mode."""
+
+    tool_name: str = Field(min_length=1)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    result: ToolResult
+
+
+class EvalFixture(BaseModel):
+    """Eval input data; execution outcomes are deliberately not fixture-owned."""
+
+    model_config = ConfigDict(extra="forbid")
+    tool_results: list[FixtureToolResult] = Field(default_factory=list)
 
 
 class EvalCase(BaseModel):
@@ -49,13 +65,23 @@ class EvalCase(BaseModel):
     min_verification_rejections: int = Field(default=0, ge=0)
     source: Literal["seed", "runtime_badcase", "manual_regression"] = "seed"
     badcase_trace_ref: str | None = None
-    fixture: dict[str, Any] = Field(default_factory=dict)
+    fixture: EvalFixture = Field(default_factory=EvalFixture)
     requires_verification: bool = True
 
     @model_validator(mode="after")
     def _regression_cases_have_a_recorded_trace(self) -> "EvalCase":
-        if self.source != "seed" and not self.badcase_trace_ref:
-            raise ValueError("regression EvalCase requires badcase_trace_ref")
+        if self.source != "seed":
+            prefix, separator, run_id = (self.badcase_trace_ref or "").partition(":")
+            if prefix != "agent_run" or not separator:
+                raise ValueError(
+                    "regression EvalCase requires an agent_run badcase_trace_ref"
+                )
+            try:
+                UUID(run_id)
+            except ValueError as error:
+                raise ValueError(
+                    "regression badcase_trace_ref requires a valid AgentRun UUID"
+                ) from error
         return self
 
 
@@ -79,7 +105,7 @@ class ExecutionRequest:
         *,
         case: EvalCase,
         requested_mode: Literal["workflow", "agent", "auto"],
-        fixture: dict[str, Any],
+        fixture: EvalFixture,
         tool_adapter: ToolAdapter | None = None,
         task_id: str | None = None,
         scripted_user_input: dict[str, str] | None = None,
@@ -129,10 +155,13 @@ class EvalResult(BaseModel):
     execution_mode: Literal["workflow", "agent"]
     grader_details: dict[str, GraderDetail]
     success: bool
+    expectation_met: bool
+    expected_failure_matched: bool | None = None
     tool_call_count: int = Field(default=0, ge=0)
     tool_retry_count: int = Field(default=0, ge=0)
     verification_rejection_count: int = Field(default=0, ge=0)
     trace_refs: list[str] = Field(default_factory=list)
+    origin_trace_ref: str | None = None
     failure_category: FailureCategory | None = None
     events: list[EvalEvent] = Field(default_factory=list)
 
@@ -180,7 +209,7 @@ class FaultInjectingToolAdapter:
 
 
 class EvalRunner:
-    """Run every EvalCase through forced and auto execution without model I/O."""
+    """Run every EvalCase through forced and auto production paths."""
 
     def __init__(
         self,
@@ -188,7 +217,7 @@ class EvalRunner:
         workflow_executor: EvalExecutor,
         agent_executor: EvalExecutor,
         auto_executor: EvalExecutor,
-        tool_adapter_factory: Callable[[EvalCase, dict[str, Any]], ToolAdapter] | None = None,
+        tool_adapter_factory: Callable[[EvalCase, EvalFixture], ToolAdapter] | None = None,
     ) -> None:
         self._executors = {
             "workflow": workflow_executor,
@@ -240,7 +269,11 @@ class EvalRunner:
             execution.verification_rejection_count for execution in executions
         )
         details = self._grade(case, mode, executions, calls)
-        success = all(detail.passed for detail in details.values())
+        expectation_met = all(detail.passed for detail in details.values())
+        success = final.status is TaskStatus.SUCCEEDED and expectation_met
+        expected_failure_matched = (
+            expectation_met if case.expected_status is TaskStatus.FAILED else None
+        )
         events = [event for execution in executions for event in execution.events]
         events.append(
             EvalEvent(
@@ -251,10 +284,13 @@ class EvalRunner:
                     "requested_mode": mode,
                     "execution_mode": final.execution_mode,
                     "success": success,
+                    "expectation_met": expectation_met,
+                    "expected_failure_matched": expected_failure_matched,
                     "failure_category": final.failure_category,
                     "tool_call_count": len(calls),
                     "tool_retry_count": retries,
                     "verification_rejection_count": verification_rejections,
+                    "origin_trace_ref": case.badcase_trace_ref,
                 },
             )
         )
@@ -265,18 +301,25 @@ class EvalRunner:
             execution_mode=final.execution_mode,
             grader_details=details,
             success=success,
+            expectation_met=expectation_met,
+            expected_failure_matched=expected_failure_matched,
             tool_call_count=len(calls),
             tool_retry_count=retries,
             verification_rejection_count=verification_rejections,
-            trace_refs=[
-                execution.trace_ref for execution in executions if execution.trace_ref
-            ],
+            trace_refs=list(
+                dict.fromkeys(
+                    execution.trace_ref
+                    for execution in executions
+                    if execution.trace_ref
+                )
+            ),
+            origin_trace_ref=case.badcase_trace_ref,
             failure_category=final.failure_category,
             events=events,
         )
 
     def _new_tool_adapter(
-        self, case: EvalCase, fixture: dict[str, Any]
+        self, case: EvalCase, fixture: EvalFixture
     ) -> FaultInjectingToolAdapter | None:
         if self._tool_adapter_factory is None:
             return None
@@ -365,14 +408,30 @@ class EvalRunner:
                 ),
             ),
             "process_verification": GraderDetail(
-                passed=not case.requires_verification or final.verification_executed,
+                passed=(
+                    requested_mode == "workflow"
+                    or (
+                        requested_mode == "auto"
+                        and final.execution_mode == "workflow"
+                    )
+                    or not case.requires_verification
+                    or final.verification_executed
+                ),
                 message="verification executed" if final.verification_executed else "verification missing",
             ),
             "process_verification_rejections": GraderDetail(
-                passed=sum(
-                    execution.verification_rejection_count for execution in executions
-                )
-                >= case.min_verification_rejections,
+                passed=(
+                    requested_mode == "workflow"
+                    or (
+                        requested_mode == "auto"
+                        and final.execution_mode == "workflow"
+                    )
+                    or sum(
+                        execution.verification_rejection_count
+                        for execution in executions
+                    )
+                    >= case.min_verification_rejections
+                ),
                 message=(
                     f"required_verification_rejections={case.min_verification_rejections}, "
                     f"got={sum(execution.verification_rejection_count for execution in executions)}"
@@ -418,10 +477,12 @@ class EvalSummary(BaseModel):
     regression_case_count: int
     workflow_complex_task_success_rate: float
     agent_complex_task_success_rate: float
-    boundary_accuracy: float
+    boundary_slice_accuracy: float
+    auto_routing_accuracy: float
     simple_over_agentization_rate: float
     agent_complex_task_improvement_supported: bool
     agent_complex_task_hypothesis: str
+    expected_failure_match_rate: float
     diagnostics: EvalDiagnostics
     regression_success_rate: float
 
@@ -441,22 +502,39 @@ def summarize_results(cases: list[EvalCase], results: list[EvalResult]) -> EvalS
     def success_rate(items: list[EvalResult]) -> float:
         return sum(result.success for result in items) / len(items) if items else 0.0
 
+    def routing_accuracy(items: list[EvalResult]) -> float:
+        return (
+            sum(
+                result.execution_mode
+                == case_by_id[result.case_id].expected_boundary
+                for result in items
+            )
+            / len(items)
+            if items
+            else 0.0
+        )
+
     seed_cases = [case for case in cases if case.source == "seed"]
     regression_cases = [case for case in cases if case.source != "seed"]
     workflow_complex = selected(
         lambda case, result: case.source == "seed"
         and case.complex_task
+        and case.expected_status is TaskStatus.SUCCEEDED
         and result.requested_mode == "workflow"
     )
     agent_complex = selected(
         lambda case, result: case.source == "seed"
         and case.complex_task
+        and case.expected_status is TaskStatus.SUCCEEDED
         and result.requested_mode == "agent"
     )
     boundary_results = selected(
         lambda case, result: case.source == "seed"
         and case.slice == "boundary"
         and result.requested_mode == "auto"
+    )
+    auto_routing_results = selected(
+        lambda _case, result: result.requested_mode == "auto"
     )
     simple_auto = selected(
         lambda case, result: case.source == "seed"
@@ -471,6 +549,9 @@ def summarize_results(cases: list[EvalCase], results: list[EvalResult]) -> EvalS
         for result in results
         if result.failure_category is not None
     )
+    expected_failures = selected(
+        lambda case, _result: case.expected_status is TaskStatus.FAILED
+    )
     workflow_rate = success_rate(workflow_complex)
     agent_rate = success_rate(agent_complex)
     improvement_supported = agent_rate > workflow_rate
@@ -480,7 +561,8 @@ def summarize_results(cases: list[EvalCase], results: list[EvalResult]) -> EvalS
         regression_case_count=len(regression_cases),
         workflow_complex_task_success_rate=workflow_rate,
         agent_complex_task_success_rate=agent_rate,
-        boundary_accuracy=success_rate(boundary_results),
+        boundary_slice_accuracy=routing_accuracy(boundary_results),
+        auto_routing_accuracy=routing_accuracy(auto_routing_results),
         simple_over_agentization_rate=(
             sum(result.execution_mode == "agent" for result in simple_auto)
             / len(simple_auto)
@@ -492,6 +574,12 @@ def summarize_results(cases: list[EvalCase], results: list[EvalResult]) -> EvalS
             "supported: Agent complex-task success rate is higher than Workflow"
             if improvement_supported
             else "not validated: Agent complex-task success rate is not higher than Workflow"
+        ),
+        expected_failure_match_rate=(
+            sum(result.expectation_met for result in expected_failures)
+            / len(expected_failures)
+            if expected_failures
+            else 0.0
         ),
         diagnostics=EvalDiagnostics(
             slice_success_rates={

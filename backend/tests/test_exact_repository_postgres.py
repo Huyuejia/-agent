@@ -6,10 +6,22 @@
 """
 
 import os
+from pathlib import Path
 
 import pytest
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+
+def _alembic_upgrade():
+    from alembic import command
+    from alembic.config import Config
+
+    config = Config(str(BACKEND_DIR / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    config.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
+    command.upgrade(config, "head")
 
 pytestmark = [pytest.mark.postgres, pytest.mark.integration]
 
@@ -26,14 +38,7 @@ def repo():
     with engine.connect():
         pass
 
-    # 测试专用：按 metadata 建表（幂等）。正式 PostgreSQL schema 由 Alembic 迁移管理。
-    from app.models.base import Base
-    import app.models.product  # noqa: F401
-    import app.models.order  # noqa: F401
-    import app.models.device  # noqa: F401
-    import app.models.error_code  # noqa: F401
-
-    Base.metadata.create_all(bind=engine)
+    _alembic_upgrade()
 
     from app.repositories.exact import SQLAlchemyExactRepository
     from app.seed import seed_demo

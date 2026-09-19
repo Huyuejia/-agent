@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     pi_runtime_timeout_seconds: float = 60.0
     agent_max_tool_calls: int = 6
     agent_max_tool_retries: int = 1
+    agent_max_verification_repairs: int = 1
 
     # BGE-M3 local model
     bge_model_path: str = "./models/bge_m3"
@@ -130,11 +131,11 @@ class Settings(BaseSettings):
             raise ValueError("Agent tool-call limit must be positive")
         return value
 
-    @field_validator("agent_max_tool_retries")
+    @field_validator("agent_max_tool_retries", "agent_max_verification_repairs")
     @classmethod
-    def _nonnegative_agent_tool_retries(cls, value: int) -> int:
+    def _nonnegative_agent_retry_limit(cls, value: int) -> int:
         if value < 0:
-            raise ValueError("Agent tool retry limit must not be negative")
+            raise ValueError("Agent retry limit must not be negative")
         return value
 
     @property

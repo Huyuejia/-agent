@@ -23,12 +23,18 @@ from app.retrieval.domain import (
 _ORDER_RE = re.compile(r"\bORD[-:：]?\d{6,}\b", re.IGNORECASE)
 _SERIAL_RE = re.compile(r"\bSN[-:：]?[A-Z0-9]{8,}\b", re.IGNORECASE)
 _ERROR_RE = re.compile(r"\b(?:E\d{3,4}|ERR[-:：]?\d{3,4})\b", re.IGNORECASE)
-_SKU_RE = re.compile(r"\b[A-Z][a-zA-Z]{1,7}-[A-Z]\d{1,2}\b", re.IGNORECASE)
+_SKU_RE = re.compile(
+    r"(?<![a-zA-Z0-9\-])[A-Z][a-zA-Z]{1,7}-[A-Z]\d{1,2}(?![a-zA-Z0-9\-])",
+    re.IGNORECASE,
+)
 
 # 关系 / 图谱类问题关键词
 _RELATION_RE = re.compile(
     r"兼容|搭配|配对|配合|能不能一起|一起用|联动|支持什么协议|协议|保修|延保|能不能接|接到|连到"
 )
+
+# 错误处理意图；缺少具体错误码时需要结构化澄清。
+_ERROR_INTENT_RE = re.compile(r"报错|错误(?:码)?|故障(?:码)?|异常(?:码)?")
 
 # 明确指代（需要会话上下文才能解析实体）
 _ANAPHORA_RE = re.compile(
@@ -141,6 +147,17 @@ class QueryAnalyzer:
                 detected_entities=entities,
                 intent="exact_lookup",
                 confidence=1.0,
+                output_top_k=1,
+            )
+
+        if _ERROR_INTENT_RE.search(text):
+            return RetrievalPlan(
+                steps=[],
+                detected_entities=entities,
+                intent="error_lookup",
+                confidence=0.8,
+                requires_clarification=True,
+                clarification_question="请提供设备显示的错误码（如 E1001）。",
                 output_top_k=1,
             )
 

@@ -44,11 +44,31 @@ def test_error_code_generates_exact():
     assert plan.steps[0].filters["entity_values"] == ["E1001"]
 
 
+def test_error_expression_without_code_requires_structured_clarification():
+    plan = _analyze("设备报错了，怎么处理？")
+
+    assert plan.intent == "error_lookup"
+    assert plan.requires_clarification is True
+    assert plan.clarification_question == "请提供设备显示的错误码（如 E1001）。"
+    assert plan.steps == []
+
+
 def test_sku_generates_exact_product_lookup():
     plan = _analyze("Cam-A1 多少钱")
     assert plan.intent == "exact_lookup"
     assert plan.steps[0].mode is RetrievalMode.EXACT
     assert "CAM-A1" in plan.steps[0].filters["entity_values"]
+
+
+def test_sku_adjacent_to_chinese_text_is_detected():
+    plan = _analyze("Cam-A1和Hub-Z1能兼容吗？")
+
+    assert plan.intent == "graph_query"
+    assert plan.requires_clarification is False
+    assert [entity.normalized_value for entity in plan.detected_entities] == [
+        "CAM-A1",
+        "HUB-Z1",
+    ]
 
 
 def test_mixed_case_sku_normalizes_but_keeps_raw():

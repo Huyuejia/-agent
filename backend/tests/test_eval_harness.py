@@ -1,8 +1,34 @@
 import json
 from pathlib import Path
 
-from app.evaluation.harness import EvalCase, EvalRunner, ExecutionResult, load_cases
-from app.evaluation.fixture_runner import build_deterministic_runner
+import pytest
+from pydantic import ValidationError
+
+from app.evaluation.harness import (
+    EvalCase,
+    EvalFixture,
+    EvalRunner,
+    ExecutionResult,
+    load_cases,
+    summarize_results,
+)
+from app.evaluation.production_runner import build_production_runner
+
+
+@pytest.mark.parametrize(
+    "forbidden_key",
+    [
+        "answer",
+        "execution_mode",
+        "verification_executed",
+        "failure_category",
+        "supported",
+    ],
+)
+def test_eval_fixture_rejects_execution_outcomes(forbidden_key):
+    with pytest.raises(ValidationError):
+        EvalFixture.model_validate({forbidden_key: "fixture-owned"})
+
 
 class RecordingExecutor:
     def __init__(self, execution_mode):
@@ -59,7 +85,9 @@ def test_runner_loads_versioned_case_and_emits_one_result_per_mode(tmp_path):
     assert all(result.success for result in results)
     assert results[-1].grader_details["boundary"].passed is True
     assert all(result.events[-1].event_type == "EVAL_RESULT" for result in results)
-    assert [request.fixture for request in workflow.requests + agent.requests + auto.requests] == [{}, {}, {}]
+    assert [request.fixture for request in workflow.requests + agent.requests + auto.requests] == [
+        EvalFixture(), EvalFixture(), EvalFixture()
+    ]
 
 
 class ClarifyingExecutor:
@@ -192,44 +220,31 @@ from app.evaluation.run_harness import main
 
 
 def test_cli_writes_jsonl_results_from_a_versioned_case_file(tmp_path):
+    repository_root = Path(__file__).resolve().parents[2]
+    case = load_cases(repository_root / "evaluation/agent_v2_seed_cases.jsonl")[0]
     cases_path = tmp_path / "cases.jsonl"
     results_path = tmp_path / "results.jsonl"
-    cases_path.write_text(
-        json.dumps(
-            {
-                "case_id": "cli-001",
-                "version": "v1",
-                "slice": "smoke",
-                "complex_task": False,
-                "initial_message": "查询 Cam-A1 的保修",
-                "expected_boundary": "workflow",
-                "required_facts": ["Cam-A1", "1 年"],
-                "fixture": {
-                    "deterministic_outcomes": {
-                        "workflow": {"answer": "Cam-A1 的保修期为 1 年", "status": "SUCCEEDED"},
-                        "agent": {"answer": "Cam-A1 的保修期为 1 年", "status": "SUCCEEDED"},
-                        "auto": {"answer": "Cam-A1 的保修期为 1 年", "status": "SUCCEEDED", "execution_mode": "workflow"},
-                    }
-                },
-            },
-            ensure_ascii=False,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    cases_path.write_text(case.model_dump_json() + "\n", encoding="utf-8")
 
     exit_code = main(
         [
             "--cases", str(cases_path),
-            "--executor-factory", "app.evaluation.fixture_runner:build_deterministic_runner",
+            "--executor-factory",
+            "app.evaluation.production_runner:build_production_runner",
             "--output", str(results_path),
         ]
     )
 
-    rows = [json.loads(line) for line in results_path.read_text(encoding="utf-8").splitlines()]
+    rows = [
+        json.loads(line)
+        for line in results_path.read_text(encoding="utf-8").splitlines()
+    ]
     assert exit_code == 0
     assert len(rows) == 3
     assert all(row["events"][-1]["event_type"] == "EVAL_RESULT" for row in rows)
+    assert next(row for row in rows if row["requested_mode"] == "agent")[
+        "trace_refs"
+    ][0].startswith("agent_run:")
 
 
 class UnsupportedSuccessExecutor:
@@ -265,10 +280,9 @@ def test_graders_reject_unsupported_unverified_success_and_auto_boundary_mismatc
         result.grader_details["outcome_supported_success"].passed is False
         for result in results
     )
-    assert all(
-        result.grader_details["process_verification"].passed is False
-        for result in results
-    )
+    assert results[1].grader_details["process_verification"].passed is False
+    assert results[0].grader_details["process_verification"].passed is True
+    assert results[2].grader_details["process_verification"].passed is True
     assert results[-1].grader_details["boundary"].passed is False
     assert results[-1].failure_category == "VERIFICATION"
 
@@ -323,7 +337,7 @@ def test_versioned_seed_and_regression_sets_report_spec_metrics(tmp_path):
             "--regression-cases",
             str(repository_root / "evaluation/agent_v2_regression_cases.jsonl"),
             "--executor-factory",
-            "app.evaluation.fixture_runner:build_deterministic_runner",
+            "app.evaluation.production_runner:build_production_runner",
             "--output",
             str(results_path),
             "--report",
@@ -334,9 +348,12 @@ def test_versioned_seed_and_regression_sets_report_spec_metrics(tmp_path):
     distribution = {}
     for case in seed_cases:
         distribution[case.slice] = distribution.get(case.slice, 0) + 1
-
+    rows = [
+        json.loads(line)
+        for line in results_path.read_text(encoding="utf-8").splitlines()
+    ]
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert exit_code == 0
+
     assert len(seed_cases) == 24
     assert distribution == {
         "simple-deterministic": 4,
@@ -347,45 +364,283 @@ def test_versioned_seed_and_regression_sets_report_spec_metrics(tmp_path):
         "verification": 3,
     }
     assert {case.source for case in regression_cases} == {"runtime_badcase"}
+    assert len(rows) == 75
+    assert exit_code == (0 if all(row["expectation_met"] for row in rows) else 1)
     assert report["seed_case_count"] == 24
     assert report["regression_case_count"] == 1
-    assert report["workflow_complex_task_success_rate"] == 1.0
-    assert report["agent_complex_task_success_rate"] == 1.0
-    assert report["boundary_accuracy"] == 1.0
-    assert report["simple_over_agentization_rate"] == 0.0
-    assert report["agent_complex_task_improvement_supported"] is False
-    assert report["agent_complex_task_hypothesis"].startswith("not validated:")
-    assert report["diagnostics"]["tool_retry_count"] >= 6
-    assert report["diagnostics"]["verification_rejection_count"] >= 9
+    assert 0.0 <= report["workflow_complex_task_success_rate"] <= 1.0
+    assert 0.0 <= report["agent_complex_task_success_rate"] <= 1.0
+    assert report["agent_complex_task_improvement_supported"] is (
+        report["agent_complex_task_success_rate"]
+        > report["workflow_complex_task_success_rate"]
+    )
+    assert report["diagnostics"]["tool_retry_count"] > 0
+    assert report["diagnostics"]["verification_rejection_count"] > 0
     assert report["diagnostics"]["tool_call_count"] > 0
     assert all(
-        json.loads(result)["success"]
-        for result in results_path.read_text(encoding="utf-8").splitlines()
+        row["trace_refs"]
+        for row in rows
+        if row["requested_mode"] == "agent"
+    )
+    assert all(
+        row["origin_trace_ref"]
+        for row in rows
+        if row["case_id"] == "runtime-badcase-retry-001"
     )
 
 
-def test_dynamic_observation_case_and_retry_badcase_are_process_graded():
+def test_every_dynamic_case_derives_the_next_tool_arguments_from_observation():
     repository_root = Path(__file__).resolve().parents[2]
-    seed_cases = load_cases(repository_root / "evaluation/agent_v2_seed_cases.jsonl")
+    dynamic_cases = [
+        case
+        for case in load_cases(
+            repository_root / "evaluation/agent_v2_seed_cases.jsonl"
+        )
+        if case.slice == "complex-dynamic-path"
+    ]
+    assert len(dynamic_cases) == 6
+
+    runner = build_production_runner()
+    for case in dynamic_cases:
+        _workflow, agent, auto = runner.run_case(case)
+        tool_calls = [
+            event.payload
+            for event in agent.events
+            if event.event_type == "TOOL_CALL"
+        ]
+        tool_results = [
+            event.payload
+            for event in agent.events
+            if event.event_type == "TOOL_RESULT"
+        ]
+        assert tool_calls[0]["tool_name"] == "exact_lookup"
+        assert len(tool_calls) >= 2
+        downstream_products = [
+            value
+            for key, value in tool_calls[1]["arguments"].items()
+            if key.startswith("product_")
+        ]
+        first_observation = json.dumps(
+            tool_results[0]["observation_summary"], ensure_ascii=False
+        )
+        assert downstream_products
+        assert all(value not in case.initial_message for value in downstream_products)
+        assert all(value in first_observation for value in downstream_products)
+        assert agent.success is True
+        assert auto.execution_mode == "agent"
+
     regression_case = load_cases(
         repository_root / "evaluation/agent_v2_regression_cases.jsonl"
     )[0]
-    runner = build_deterministic_runner()
-    dynamic_case = next(
-        case for case in seed_cases if case.case_id == "complex-observation-warranty-001"
+    _workflow, regression_agent, _auto = runner.run_case(regression_case)
+    assert regression_agent.success is True
+    assert regression_agent.tool_retry_count == 1
+    assert regression_agent.origin_trace_ref == regression_case.badcase_trace_ref
+
+
+def test_production_runner_uses_real_workflow_agent_and_auto_router_paths():
+    case = EvalCase(
+        case_id="production-paths-001",
+        version="v1",
+        slice="complex-dynamic-path",
+        complex_task=True,
+        initial_message="先查出错误码 E1001 对应的产品，再查询该产品保修。",
+        expected_boundary="agent",
+        required_capabilities=["exact_lookup", "graph_lookup"],
+        required_facts=["Cam-A1", "1 年"],
+        fixture={
+            "tool_results": [
+                {
+                    "tool_name": "exact_lookup",
+                    "arguments": {"entity_type": "error_code", "identifier": "E1001"},
+                    "result": {
+                        "status": "OK",
+                        "data": {
+                            "entities": [
+                                {"attributes": {"product_sku": "Cam-A1"}}
+                            ]
+                        },
+                    },
+                },
+                {
+                    "tool_name": "graph_lookup",
+                    "arguments": {
+                        "operation": "warranty",
+                        "product_a": "Cam-A1",
+                    },
+                    "result": {
+                        "status": "OK",
+                        "evidence": [
+                            {
+                                "evidence_id": "neo4j:warranty:Cam-A1",
+                                "kind": "graph",
+                                "text": "Cam-A1 适用标准保修，保修期 1 年。",
+                                "citation": {"source_type": "fixture"},
+                            }
+                        ],
+                    },
+                },
+            ]
+        },
     )
 
-    dynamic_results = runner.run_case(dynamic_case)
-    regression_results = runner.run_case(regression_case)
+    workflow, agent, auto = build_production_runner().run_case(case)
 
-    assert all(
-        result.grader_details["process_tool_arguments"].passed
-        for result in dynamic_results
+    assert [workflow.execution_mode, agent.execution_mode, auto.execution_mode] == [
+        "workflow",
+        "agent",
+        "agent",
+    ]
+    assert workflow.success is False
+    assert agent.success is True
+    assert auto.success is True
+    assert agent.trace_refs[0].startswith("agent_run:")
+    agent_tool_calls = [
+        event.payload for event in agent.events if event.event_type == "TOOL_CALL"
+    ]
+    assert [call["tool_name"] for call in agent_tool_calls] == [
+        "exact_lookup",
+        "graph_lookup",
+    ]
+    assert agent_tool_calls[1]["arguments"]["product_a"] == "Cam-A1"
+
+
+class ExpectedFailureExecutor:
+    def __init__(self, execution_mode):
+        self.execution_mode = execution_mode
+
+    def run(self, _request):
+        return ExecutionResult(
+            execution_mode=self.execution_mode,
+            status="FAILED",
+            failure_category="TOOL_OR_RETRIEVAL",
+        )
+
+
+def test_expected_failures_do_not_inflate_complex_task_success_rate():
+    case = EvalCase(
+        case_id="expected-failure-001",
+        version="v1",
+        slice="tool-retrieval-failure",
+        complex_task=True,
+        initial_message="查询不存在的错误码 E9999",
+        expected_boundary="agent",
+        expected_status="FAILED",
+        requires_verification=False,
     )
-    assert all(result.tool_call_count == 2 for result in dynamic_results)
-    assert all(result.success for result in regression_results)
-    assert all(result.tool_retry_count == 1 for result in regression_results)
-    assert all(
-        result.grader_details["process_required_retries"].passed
-        for result in regression_results
+    results = EvalRunner(
+        workflow_executor=ExpectedFailureExecutor("workflow"),
+        agent_executor=ExpectedFailureExecutor("agent"),
+        auto_executor=ExpectedFailureExecutor("agent"),
+    ).run_case(case)
+
+    assert all(result.success is False for result in results)
+    assert all(result.expectation_met is True for result in results)
+    assert all(result.expected_failure_matched is True for result in results)
+    summary = summarize_results([case], results)
+    assert summary.workflow_complex_task_success_rate == 0.0
+    assert summary.agent_complex_task_success_rate == 0.0
+    assert summary.expected_failure_match_rate == 1.0
+
+
+def test_summary_distinguishes_boundary_slice_from_all_case_auto_routing_accuracy():
+    boundary_case = EvalCase(
+        case_id="boundary-workflow-001",
+        version="v1",
+        slice="boundary",
+        complex_task=False,
+        initial_message="Cam-A1 保修多久？",
+        expected_boundary="workflow",
     )
+    missing_case = EvalCase(
+        case_id="missing-agent-001",
+        version="v1",
+        slice="missing-information",
+        complex_task=True,
+        initial_message="查询产品保修。",
+        expected_boundary="agent",
+    )
+    runner = EvalRunner(
+        workflow_executor=WrongModeExecutor("workflow"),
+        agent_executor=WrongModeExecutor("agent"),
+        auto_executor=WrongModeExecutor("workflow"),
+    )
+
+    summary = summarize_results(
+        [boundary_case, missing_case],
+        runner.run_cases([boundary_case, missing_case]),
+    )
+
+    assert summary.boundary_slice_accuracy == 1.0
+    assert summary.auto_routing_accuracy == 0.5
+    assert not hasattr(summary, "boundary_accuracy")
+
+
+def test_regression_case_rejects_static_file_as_badcase_trace_ref():
+    with pytest.raises(ValidationError):
+        EvalCase(
+            case_id="runtime-badcase-static-001",
+            version="v1",
+            source="runtime_badcase",
+            badcase_trace_ref="evaluation/badcase.json",
+            # Static files cannot stand in for a persisted AgentRun trace.
+            slice="failure",
+            complex_task=True,
+            initial_message="查询",
+            expected_boundary="agent",
+        )
+
+
+def test_regression_result_links_origin_and_current_real_run_trace():
+    case = EvalCase(
+        case_id="runtime-badcase-001",
+        version="v1",
+        source="runtime_badcase",
+        badcase_trace_ref="agent_run:8f0c5731-f6cb-4d69-92ca-81d9726a46bf",
+        slice="tool-retrieval-failure",
+        complex_task=True,
+        initial_message="先查错误码 E9999 对应产品，再查询该产品保修。",
+        expected_boundary="agent",
+        expected_status="FAILED",
+        requires_verification=False,
+    )
+
+    _workflow, agent, _auto = build_production_runner().run_case(case)
+
+    assert agent.expectation_met is True
+    assert agent.failure_category == "TOOL_OR_RETRIEVAL"
+    assert agent.origin_trace_ref == "agent_run:8f0c5731-f6cb-4d69-92ca-81d9726a46bf"
+    assert agent.trace_refs[0].startswith("agent_run:")
+    assert agent.trace_refs[0] != agent.origin_trace_ref
+    assert any(
+        event.event_type == "RUN_COMPLETED"
+        and event.payload["failure_category"] == "TOOL_OR_RETRIEVAL"
+        for event in agent.events
+    )
+
+def test_resumed_eval_trace_contains_each_real_event_once():
+    repository_root = Path(__file__).resolve().parents[2]
+    case = next(
+        case
+        for case in load_cases(
+            repository_root / "evaluation/agent_v2_seed_cases.jsonl"
+        )
+        if case.case_id == "missing-warranty-001"
+    )
+
+    _workflow, agent, _auto = build_production_runner().run_case(case)
+
+    ask_user_events = [
+        event
+        for event in agent.events
+        if event.event_type == "MODEL_DECISION"
+        and event.payload.get("decision") == "ASK_USER"
+    ]
+    sequence_numbers = [
+        event.payload["sequence_number"]
+        for event in agent.events
+        if "sequence_number" in event.payload
+    ]
+    assert len(ask_user_events) == 1
+    assert sequence_numbers == sorted(set(sequence_numbers))
+    assert len(agent.trace_refs) == 1

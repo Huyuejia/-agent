@@ -160,14 +160,18 @@ def test_waiting_task_resumes_from_persisted_state_without_replacing_objective()
 
     completed = _execute(
         service, db, user, conversation,
-        objective="Cam-A1", resume_run_id=waiting["agent_run_id"],
+        objective="Cam-A1",
+        resume_run_id=waiting["agent_run_id"],
+        resume_fields={"product_name": "Cam-A1"},
     )
 
     assert completed["agent_run_id"] == waiting["agent_run_id"]
     assert completed["task_status"] == "SUCCEEDED"
     run = db.get(AgentRun, completed["agent_run_id"])
     assert run.objective == "查询设备保修"
-    assert run.task_state["known_facts"] == [{"source": "user", "text": "Cam-A1"}]
+    assert run.task_state["known_facts"] == [
+        {"source": "user", "fields": {"product_name": "Cam-A1"}}
+    ]
     assert run.task_state["missing_information"] == []
     events = db.scalars(
         select(AgentTraceEvent)
@@ -175,6 +179,11 @@ def test_waiting_task_resumes_from_persisted_state_without_replacing_objective()
         .order_by(AgentTraceEvent.sequence_number)
     ).all()
     assert [event.sequence_number for event in events] == list(range(1, len(events) + 1))
+    assert any(
+        event.event_type == "MODEL_DECISION"
+        and event.payload["decision"] == "ASK_USER"
+        for event in events
+    )
     assert any(
         event.event_type == "STATE_TRANSITION"
         and event.payload["from"] == "WAITING_FOR_USER"
@@ -367,3 +376,29 @@ def test_second_verification_rejection_returns_safe_fallback_without_success():
     ).all()
     assert [event.event_type for event in events].count("VERIFICATION_RESULT") == 2
     assert events[-1].event_type == "RUN_COMPLETED"
+
+
+def test_verification_repair_limit_zero_disables_repair():
+    db = _database()
+    user, conversation = _context(db)
+    runtime = VerificationRepairRuntime()
+    service, _adapter = _service(
+        runtime,
+        [_success_result()],
+        max_verification_repairs=0,
+    )
+
+    result = _execute(service, db, user, conversation)
+
+    assert result["task_status"] == "FAILED"
+    assert runtime.repair_feedback == []
+    events = db.scalars(
+        select(AgentTraceEvent).where(
+            AgentTraceEvent.run_id == result["agent_run_id"]
+        )
+    ).all()
+    assert not any(
+        event.event_type == "RETRY"
+        and event.payload.get("reason") == "VERIFICATION_REPAIR"
+        for event in events
+    )

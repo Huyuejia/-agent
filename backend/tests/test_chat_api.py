@@ -218,7 +218,7 @@ class TestCompatibilityRoute:
         assert len(data["sources"]) == 1
         assert "COMPATIBLE_WITH" in data["sources"][0]["relation"]
 
-    def test_unknown_product_compatibility(self, client):
+    def test_unknown_product_compatibility_requires_agent(self, client):
         cid = _create_conv(client)
         resp = client.post("/api/chat", json={
             "conversation_id": cid,
@@ -226,7 +226,8 @@ class TestCompatibilityRoute:
         })
         assert resp.status_code == 200, resp.text
         data = resp.json()
-        assert data["intent"] == "compatibility"
+        assert data["execution_mode"] == "agent"
+        assert data["intent"] == "agent_unavailable"
         assert data["handoff_required"] is True
 
     def test_single_product_no_pair(self, client):

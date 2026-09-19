@@ -1,6 +1,7 @@
 """真实 PostgreSQL 上的幂等文档索引集成测试。"""
 
 import os
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -14,6 +15,17 @@ from app.retrieval import JiebaTokenizer
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+
+def _alembic_upgrade():
+    from alembic import command
+    from alembic.config import Config
+
+    config = Config(str(BACKEND_DIR / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    config.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
+    command.upgrade(config, "head")
 pytestmark = pytest.mark.skipif(
     not TEST_DATABASE_URL,
     reason="TEST_DATABASE_URL 未设置，跳过 PostgreSQL 集成测试",
@@ -34,6 +46,7 @@ class FakeEmbedder:
 
 @pytest.fixture
 def session():
+    _alembic_upgrade()
     engine = create_engine(TEST_DATABASE_URL)
     connection = engine.connect()
     transaction = connection.begin()

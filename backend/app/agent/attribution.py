@@ -27,6 +27,11 @@ class FailureAttributor:
             return FailureCategory.VERIFICATION
         if error_code in self._DIRECT_CATEGORIES:
             return self._DIRECT_CATEGORIES[error_code]
+        if error_code == "TOOL_NOT_FOUND" or any(
+            observation.result.status is ToolStatus.NOT_FOUND
+            for observation in state.tool_observations
+        ):
+            return FailureCategory.TOOL_OR_RETRIEVAL
 
         unresolved_errors = [
             observation.result.error_code

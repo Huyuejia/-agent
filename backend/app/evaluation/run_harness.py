@@ -67,7 +67,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             + "\n",
             encoding="utf-8",
         )
-    return 0 if all(result.success for result in results) else 1
+    return 0 if all(result.expectation_met for result in results) else 1
 
 
 if __name__ == "__main__":

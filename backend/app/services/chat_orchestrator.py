@@ -43,7 +43,8 @@ INTENT_RULES: list[tuple[str, list[str]]] = [
                           "能用吗", "一起用", "接到", "连到", "接上",
                           "能不能接", "支持.*吗", "联动", "能不能连"]),
     ("warranty_fault",   ["保修", "坏了", "故障", "维修", "延保", "不工作",
-                          "有问题", "失灵", "打不开", "不亮", "没反应",
+                          "有问题", "失灵", "报错", "错误", "故障码", "异常",
+                          "打不开", "不亮", "没反应",
                           "不转了", "连不上", "掉线", "不报警"]),
     ("return_refund",    ["退货", "退款", "退换", "无理由", "退掉", "换货"]),
     ("shipping",         ["发货", "物流", "快递", "配送", "送货", "到哪了",
@@ -269,6 +270,7 @@ class ChatOrchestrator:
         db: Session,
         user_id: int | None = None,
         request_id: str = "",
+        resume_fields: dict[str, str] | None = None,
     ) -> dict:
         """
         完整编排：分类 → 路由 → 保存 → 返回 ChatResponse 字典。
@@ -292,6 +294,7 @@ class ChatOrchestrator:
                     request_id=request_id or current_request_id(),
                     boundary_reason="waiting_task_resume",
                     resume_run_id=waiting_run_id,
+                    resume_fields=resume_fields,
                     db=db,
                 )
                 self._save_result(db, conversation_id, message, result)
