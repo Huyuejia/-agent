@@ -5,8 +5,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import app.services.chat_orchestrator as orchestrator_module
+import app.services.legacy_chat as legacy_module
 from app.services.chat_orchestrator import ChatOrchestrator
+from app.services.legacy_chat import LegacyChatService
 
 
 class FakeClassifier:
@@ -102,8 +103,8 @@ def test_orchestrator_continues_new_routing_when_agent_resume_is_not_handled():
     classifier = FakeClassifier()
     db = FakeDb()
     orchestrator = ChatOrchestrator(
-        classifier=classifier,
         agent_service=service,
+        legacy_service=LegacyChatService(classifier=classifier),
     )
 
     result = orchestrator.route(
@@ -121,7 +122,9 @@ def test_orchestrator_continues_new_routing_when_agent_resume_is_not_handled():
 def test_injected_classifier_controls_route():
     classifier = FakeClassifier()
     db = FakeDb()
-    orchestrator = ChatOrchestrator(classifier=classifier)
+    orchestrator = ChatOrchestrator(
+        legacy_service=LegacyChatService(classifier=classifier)
+    )
 
     result = orchestrator.route(
         message="这句话故意不包含投诉关键词",
@@ -138,7 +141,7 @@ def test_injected_classifier_controls_route():
 
 
 def test_model_failure_falls_back_to_rules():
-    classifier = orchestrator_module.FallbackIntentClassifier(
+    classifier = legacy_module.FallbackIntentClassifier(
         primary=BrokenClassifier(),
     )
 
@@ -169,8 +172,8 @@ def test_unified_retrieval_service_bypasses_legacy_classifier_and_persists():
     service = FakeRetrievalService()
     db = FakeDb()
     orchestrator = ChatOrchestrator(
-        classifier=BrokenClassifier(),
         retrieval_service=service,
+        legacy_service=LegacyChatService(classifier=BrokenClassifier()),
     )
 
     result = orchestrator.route("Cam-A1", conversation_id=7, db=db)

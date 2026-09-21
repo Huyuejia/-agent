@@ -18,10 +18,11 @@ from app.schemas.conversation import (
     ChatResponse,
     ConversationCreateResponse,
 )
-from app.services.chat_orchestrator import (
-    ChatOrchestrator,
+from app.services.chat_orchestrator import ChatOrchestrator
+from app.services.legacy_chat import (
     FallbackIntentClassifier,
     RuleBasedIntentClassifier,
+    create_legacy_chat_service,
 )
 from app.services.intent_model_client import HttpIntentClassifier
 
@@ -34,28 +35,34 @@ _orchestrator: ChatOrchestrator | None = None
 def _get_orchestrator() -> ChatOrchestrator:
     global _orchestrator
     if _orchestrator is None:
-        classifier = RuleBasedIntentClassifier()
-        if settings.intent_model_url:
-            model_classifier = HttpIntentClassifier(
-                base_url=settings.intent_model_url,
-                timeout_seconds=settings.intent_model_timeout_seconds,
-            )
-            classifier = FallbackIntentClassifier(
-                primary=model_classifier,
-                fallback=classifier,
-            )
+        legacy_service = None
         retrieval_service = None
         agent_service = None
-        if not settings.demo_offline_mode:
+        if settings.demo_offline_mode:
+            classifier = RuleBasedIntentClassifier()
+            if settings.intent_model_url:
+                model_classifier = HttpIntentClassifier(
+                    base_url=settings.intent_model_url,
+                    timeout_seconds=settings.intent_model_timeout_seconds,
+                )
+                classifier = FallbackIntentClassifier(
+                    primary=model_classifier,
+                    fallback=classifier,
+                )
+            legacy_service = create_legacy_chat_service(
+                classifier=classifier,
+                offline_mode=True,
+            )
+        else:
             from app.agent.factory import create_agent_task_service
             from app.services.retrieval_chat import create_retrieval_chat_service
 
             retrieval_service = create_retrieval_chat_service()
             agent_service = create_agent_task_service(retrieval_service)
         _orchestrator = ChatOrchestrator(
-            classifier=classifier,
             retrieval_service=retrieval_service,
             agent_service=agent_service,
+            legacy_service=legacy_service,
         )
     return _orchestrator
 

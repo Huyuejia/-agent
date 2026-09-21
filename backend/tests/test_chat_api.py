@@ -119,6 +119,7 @@ class FakeRAGService:
 def client():
     """创建 TestClient，注入 fake GraphService / RAGService + 内存 SQLite。"""
     from app.main import create_app
+    from app.services.legacy_chat import LegacyChatService, RuleBasedIntentClassifier
     from app.services.chat_orchestrator import ChatOrchestrator
 
     app = create_app(initialize_database=False)
@@ -172,8 +173,11 @@ def client():
     import app.api.conversations as conv_mod
 
     fake_orch = ChatOrchestrator(
-        graph_service=FakeGraphService(),
-        rag_service=FakeRAGService(),
+        legacy_service=LegacyChatService(
+            classifier=RuleBasedIntentClassifier(),
+            graph_service=FakeGraphService(),
+            rag_service=FakeRAGService(),
+        ),
     )
     conv_mod._orchestrator = fake_orch
 

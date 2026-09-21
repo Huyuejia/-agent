@@ -36,6 +36,7 @@ from app.models.base import Base
 from app.models.conversation import Conversation, Message
 from app.models.user import User
 from app.services.chat_orchestrator import ChatOrchestrator
+from app.services.legacy_chat import LegacyChatService, RuleBasedIntentClassifier
 
 
 class FixtureToolAdapter:
@@ -464,10 +465,13 @@ class ProductionEvalExecutor:
         else:
             router = ExecutionRouter()
         orchestrator = ChatOrchestrator(
-            graph_service=_WorkflowGraph(tools),
-            rag_service=_WorkflowKnowledge(tools),
             agent_service=agent_service,
             execution_router=router,
+            legacy_service=LegacyChatService(
+                classifier=RuleBasedIntentClassifier(),
+                graph_service=_WorkflowGraph(tools),
+                rag_service=_WorkflowKnowledge(tools),
+            ),
         )
         return _ExecutionContext(
             db=db,

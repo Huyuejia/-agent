@@ -127,8 +127,6 @@ def test_existing_chat_endpoint_runs_dynamic_task_and_persists_messages():
         ),
     )
     conversations_api._orchestrator = ChatOrchestrator(
-        graph_service=FixtureGraph(),
-        rag_service=FixtureKnowledge(),
         agent_service=service,
     )
     app = create_app(initialize_database=False)

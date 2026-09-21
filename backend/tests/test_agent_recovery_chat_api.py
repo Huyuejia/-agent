@@ -87,8 +87,6 @@ def test_chat_endpoint_resumes_waiting_task_before_new_routing_decision():
         ),
     )
     conversations_api._orchestrator = ChatOrchestrator(
-        graph_service=FixtureGraph(),
-        rag_service=FixtureKnowledge(),
         agent_service=service,
     )
     app = create_app(initialize_database=False)

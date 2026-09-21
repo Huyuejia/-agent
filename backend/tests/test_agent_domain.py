@@ -15,7 +15,7 @@ from app.agent.domain import (
 from app.agent.attribution import FailureAttributor
 from app.agent.routing import ExecutionRouter
 from app.agent.verification import CandidateVerifier
-from app.services.chat_orchestrator import RuleBasedIntentClassifier
+from app.services.legacy_chat import RuleBasedIntentClassifier
 
 
 def test_router_keeps_deterministic_lookup_on_workflow():

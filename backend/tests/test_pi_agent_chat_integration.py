@@ -87,8 +87,6 @@ def test_real_pi_loop_completes_dynamic_task_through_chat_api():
         ),
     )
     conversations_api._orchestrator = ChatOrchestrator(
-        graph_service=FixtureGraph(),
-        rag_service=FixtureKnowledge(),
         agent_service=service,
     )
     app = create_app(initialize_database=False)
