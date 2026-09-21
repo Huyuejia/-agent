@@ -47,7 +47,7 @@ class FixtureGraph:
 
 class FixtureKnowledge:
     def search(self, query, top_k=3):
-        return {"sources": []}
+        return []
 
 
 class ObservationDependentModel:

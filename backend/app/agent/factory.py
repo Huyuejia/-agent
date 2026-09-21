@@ -6,19 +6,16 @@ from app.agent.runtime import SubprocessPiRuntimeClient
 from app.agent.service import AgentTaskService
 from app.agent.tools import AgentToolAdapter
 from app.config import settings
+from app.retrieval.domain import Evidence
 
 
 class _KnowledgeSearchAdapter:
     def __init__(self, retrieval_service) -> None:
         self._retrieval = retrieval_service
 
-    def search(self, query: str, top_k: int = 3) -> dict:
-        result = self._retrieval.answer(query)
-        return {
-            "sources": [
-                source.model_dump() for source in result["sources"][:top_k]
-            ]
-        }
+    def search(self, query: str, top_k: int = 3) -> list[Evidence]:
+        result = self._retrieval.retrieve(query)
+        return result.evidence[:top_k]
 
 
 def create_agent_task_service(retrieval_service) -> AgentTaskService:

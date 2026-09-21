@@ -212,6 +212,11 @@ def test_hybrid_runtime_error_explicitly_degrades_to_lexical(monkeypatch):
         tokenizer=FakeTokenizer(),
     )
 
+    retrieved = service.retrieve("退货政策是什么")
+
+    assert retrieved.evidence[0].evidence_id == "document_chunks:chunk-lexical"
+    assert retrieved.evidence[0].kind is RetrievalMode.LEXICAL
+
     result = service.answer("退货政策是什么")
 
     assert result["source_type"] == "document_rag"

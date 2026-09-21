@@ -233,9 +233,22 @@ class RetrievalChatService:
 
     def answer(self, query: str) -> RetrievalChatResult:
         plan = self._analyzer.analyze(query)
+        execution = self._execute(query, plan)
+        return self._answerer.answer(query, plan, execution)
+
+    def retrieve(self, query: str) -> RetrievalExecutionResult:
+        """Execute retrieval without generating an answer for Agent tools."""
+        plan = self._analyzer.analyze(query)
+        return self._execute(query, plan)
+
+    def _execute(
+        self,
+        query: str,
+        plan: RetrievalPlan,
+    ) -> RetrievalExecutionResult:
         if not plan.steps:
             execution = RetrievalExecutor({}).execute(query, plan)
-            return self._answerer.answer(query, plan, execution)
+            return execution
 
         session = self._session_factory()
         try:
@@ -280,7 +293,7 @@ class RetrievalChatService:
                 execution = executor.execute(query, lexical_plan)
         finally:
             session.close()
-        return self._answerer.answer(query, plan, execution)
+        return execution
 
 
 def create_retrieval_chat_service() -> RetrievalChatService:

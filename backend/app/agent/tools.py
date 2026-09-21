@@ -22,7 +22,7 @@ class GraphQueryPort(Protocol):
 
 
 class KnowledgeSearchPort(Protocol):
-    def search(self, query: str, top_k: int = 3) -> dict: ...
+    def search(self, query: str, top_k: int = 3) -> list[Evidence]: ...
 
 
 class _StrictArgs(BaseModel):
@@ -173,30 +173,11 @@ class AgentToolAdapter:
         return ToolResult(status=ToolStatus.OK, data=data, evidence=[evidence])
 
     def _knowledge_search(self, args: KnowledgeSearchArgs) -> ToolResult:
-        response = self._knowledge.search(args.query, top_k=args.top_k)
-        evidence = []
-        for index, source in enumerate(response.get("sources", []), start=1):
-            document = source.get("document_name") or "unknown"
-            location = source.get("location") or "unknown"
-            evidence.append(
-                Evidence(
-                    evidence_id=f"document:{document}:{location}:{index}",
-                    kind=RetrievalMode.HYBRID,
-                    text=source.get("snippet") or "",
-                    citation=Citation(
-                        source_type="document_chunks",
-                        payload={
-                            "document_name": document,
-                            "location": location,
-                        },
-                    ),
-                    fused_score=0.0,
-                )
-            )
+        evidence = self._knowledge.search(args.query, top_k=args.top_k)
         return ToolResult(
             status=ToolStatus.OK if evidence else ToolStatus.NOT_FOUND,
             data={"query": args.query},
-            evidence=evidence,
+            evidence=evidence[:args.top_k],
         )
 
     @staticmethod
