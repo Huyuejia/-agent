@@ -5,7 +5,7 @@ import './App.css';
 // Types
 // ---------------------------------------------------------------------------
 interface MessageSource {
-  source_type: 'knowledge_graph' | 'document_rag';
+  source_type: 'knowledge_graph' | 'document_rag' | 'exact';
   document_name?: string | null;
   location?: string | null;
   snippet?: string | null;
@@ -20,6 +20,11 @@ interface ChatResponse {
   source_type: string;
   sources: MessageSource[];
   handoff_required: boolean;
+  execution_mode?: string | null;
+  agent_run_id?: string | null;
+  task_status?: string | null;
+  needs_user_input?: boolean;
+  requested_fields?: string[];
 }
 
 interface Message {
@@ -265,6 +270,9 @@ export default function App() {
                     {msg.detail.sources.map((s, si) => (
                       <div key={si} className="wb-source-item">
                         {s.source_type === 'knowledge_graph' && s.relation && (
+                          <span className="wb-source-rel">{s.relation}</span>
+                        )}
+                        {s.source_type === 'exact' && s.relation && (
                           <span className="wb-source-rel">{s.relation}</span>
                         )}
                         {s.source_type === 'document_rag' && (

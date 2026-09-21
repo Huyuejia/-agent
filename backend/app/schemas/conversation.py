@@ -23,7 +23,7 @@ class ChatRequest(BaseModel):
 
 
 class MessageSource(BaseModel):
-    source_type: str  # "knowledge_graph" | "document_rag"
+    source_type: str  # "knowledge_graph" | "document_rag" | "exact"
     document_name: str | None = None
     location: str | None = None
     snippet: str | None = None
