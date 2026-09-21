@@ -2,7 +2,7 @@
 会话与聊天编排集成测试。
 
 - GraphService 用 fake/mock，不依赖 Neo4j
-- RAGService 用 fake，不依赖 Chroma/BGE-M3
+- 旧编排降级用 fake，不依赖真实检索后端
 - 数据库用内存 SQLite
 - 不调 Qwen API、不加载模型
 """
@@ -87,7 +87,7 @@ class FakeGraphService:
 # Fake RAGService
 # ===================================================================
 class FakeRAGService:
-    """返回固定结果的虚拟 RAG 服务，不依赖 Chroma。"""
+    """返回固定结果的虚拟文档结果，不依赖真实检索后端。"""
 
     def search(self, query: str, top_k: int = 3) -> dict:
         snippet = (
@@ -118,8 +118,11 @@ class FakeRAGService:
 @pytest.fixture(scope="module")
 def client():
     """创建 TestClient，注入 fake GraphService / RAGService + 内存 SQLite。"""
-    from app.main import app
+    from app.main import create_app
+    from app.services.legacy_chat import LegacyChatService, RuleBasedIntentClassifier
     from app.services.chat_orchestrator import ChatOrchestrator
+
+    app = create_app(initialize_database=False)
 
     # 内存 SQLite
     test_engine = create_engine(
@@ -127,9 +130,35 @@ def client():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    DocBase.metadata.create_all(bind=test_engine)
-    ConvBase.metadata.create_all(bind=test_engine)
+    # 用 tables= 限制建表范围，避免共享 Base.metadata 里其它 PostgreSQL 专有表
+    # （如 document_chunks）污染 SQLite 建表（CompileError）。
+    from app.models.conversation import Conversation, Message
+    from app.models.user import User
+
+    DocBase.metadata.create_all(
+        bind=test_engine,
+        tables=[
+            User.__table__,
+            Conversation.__table__,
+            Message.__table__,
+        ],
+    )
     TestingSessionLocal = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
+
+
+    auth_db = TestingSessionLocal()
+    user = User(
+        email="chat@example.com",
+        normalized_email="chat@example.com",
+        password_hash="test-only",
+        role="user",
+        is_active=True,
+    )
+    auth_db.add(user)
+    auth_db.commit()
+    auth_db.refresh(user)
+    user_id = user.id
+    auth_db.close()
 
     def override_get_db():
         db = TestingSessionLocal()
@@ -144,12 +173,18 @@ def client():
     import app.api.conversations as conv_mod
 
     fake_orch = ChatOrchestrator(
-        graph_service=FakeGraphService(),
-        rag_service=FakeRAGService(),
+        legacy_service=LegacyChatService(
+            classifier=RuleBasedIntentClassifier(),
+            graph_service=FakeGraphService(),
+            rag_service=FakeRAGService(),
+        ),
     )
     conv_mod._orchestrator = fake_orch
 
     with TestClient(app) as tc:
+        from app.security.jwt import create_access_token
+
+        tc.headers.update({"Authorization": f"Bearer {create_access_token(user_id)}"})
         yield tc
 
     app.dependency_overrides.clear()
@@ -187,7 +222,7 @@ class TestCompatibilityRoute:
         assert len(data["sources"]) == 1
         assert "COMPATIBLE_WITH" in data["sources"][0]["relation"]
 
-    def test_unknown_product_compatibility(self, client):
+    def test_unknown_product_compatibility_requires_agent(self, client):
         cid = _create_conv(client)
         resp = client.post("/api/chat", json={
             "conversation_id": cid,
@@ -195,7 +230,8 @@ class TestCompatibilityRoute:
         })
         assert resp.status_code == 200, resp.text
         data = resp.json()
-        assert data["intent"] == "compatibility"
+        assert data["execution_mode"] == "agent"
+        assert data["intent"] == "agent_unavailable"
         assert data["handoff_required"] is True
 
     def test_single_product_no_pair(self, client):

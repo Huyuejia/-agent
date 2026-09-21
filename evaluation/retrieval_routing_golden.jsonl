@@ -1,0 +1,10 @@
+{"case_id":"exact-order","query":"查询订单 ORD-100001 的状态","expected_modes":["exact"],"expected_entities":["order:ORD100001"]}
+{"case_id":"exact-serial","query":"SN:AB12CD34 是否已激活","expected_modes":["exact"],"expected_entities":["serial:SNAB12CD34"]}
+{"case_id":"exact-error","query":"错误码 E1001 怎么处理","expected_modes":["exact"],"expected_entities":["error_code:E1001"]}
+{"case_id":"exact-sku","query":"Cam-A1 的商品信息","expected_modes":["exact"],"expected_entities":["sku:CAM-A1"]}
+{"case_id":"graph-compatibility","query":"Cam-A1 和 Hub-Z1 兼容吗","expected_modes":["exact","graph"],"expected_entities":["sku:CAM-A1","sku:HUB-Z1"]}
+{"case_id":"graph-protocol","query":"Hub-Z1 支持什么协议","expected_modes":["exact","graph"],"expected_entities":["sku:HUB-Z1"]}
+{"case_id":"graph-warranty","query":"Cam-A1 保修多久","expected_modes":["exact","graph"],"expected_entities":["sku:CAM-A1"]}
+{"case_id":"needs-context","query":"这两个兼容吗","expected_modes":[],"expected_entities":[]}
+{"case_id":"needs-clarification","query":"这个设备保修吗","expected_modes":[],"expected_entities":[]}
+{"case_id":"hybrid-document","query":"购买后七天内可以退货吗","expected_modes":["lexical","vector"],"expected_entities":[]}

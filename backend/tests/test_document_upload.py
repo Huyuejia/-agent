@@ -8,7 +8,6 @@
 import io
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -78,57 +77,111 @@ def _make_test_docx(text: str) -> io.BytesIO:
 
 
 # ---------------------------------------------------------------------------
-# TestClient + fake RagService
+# TestClient + fake PostgreSQL indexing/search services
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def client() -> TestClient:
-    """创建 TestClient，注入 fake embedding 的 RagService。"""
-    from app.main import app
-    from app.services.rag_service import RagService
+    """用 SQLite 元数据表与内存 fake 隔离真实 PostgreSQL/GPU。"""
+    from app.dependencies.retrieval import (
+        get_document_indexing_service,
+        get_document_search_service,
+    )
+    from app.main import create_app
+    from app.postgres_database import get_postgres_db
 
-    # 用临时目录做 Chroma 持久化
-    tmpdir = tempfile.mkdtemp(prefix="chroma_test_")
-    fake_rag = RagService(embed_fn=_fake_embed_fn, embed_dim=EMBED_DIM, persist_dir=tmpdir)
+    app = create_app(initialize_database=False)
 
-    # 注入 fake rag_service（惰性 getter 会在首次调用时发现已设置）
-    import app.api.documents as doc_mod
+    class FakeDocumentSearchService:
+        def __init__(self):
+            self.chunks = []
 
-    doc_mod._rag_service = fake_rag
+        def search(self, query, top_k=4):
+            ordered = sorted(
+                self.chunks,
+                key=lambda item: query not in item.content,
+            )[:top_k]
+            sources = [
+                {
+                    "document_name": item.metadata["document_name"],
+                    "location": item.location,
+                    "snippet": item.content[:200],
+                }
+                for item in ordered
+            ]
+            return {
+                "query": query,
+                "answer": "未命中" if not sources else sources[0]["snippet"],
+                "source_type": "document_rag",
+                "sources": sources,
+                "chunk_count": len(sources),
+            }
 
-    # 建表（使用测试数据库或跳过）
-    # 这里只测业务逻辑链，不连真实 MySQL — 用内存 SQLite 替代
+    class FakeDocumentIndexingService:
+        def __init__(self, search_service):
+            self.calls = []
+            self._search = search_service
+
+        def index_document(self, document, chunks):
+            copied = list(chunks)
+            self.calls.append((document, copied))
+            self._search.chunks.extend(copied)
+
+    fake_search = FakeDocumentSearchService()
+    fake_indexing = FakeDocumentIndexingService(fake_search)
+    app.state.fake_document_indexing = fake_indexing
+    app.dependency_overrides[get_document_indexing_service] = lambda: fake_indexing
+    app.dependency_overrides[get_document_search_service] = lambda: fake_search
+
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-
-    from app.database import get_db
-    from app.models.document import Base
-
     from sqlalchemy.pool import StaticPool
+
+    from app.models.base import Base
+    from app.models.document import Document
+    from app.models.user import User
 
     test_engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    # 在 SQLite 里建表（MySQL create_tables 在 lifespan 中因无 MySQL 而跳过）
-    Base.metadata.create_all(bind=test_engine)
-    TestingSessionLocal = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
+    Base.metadata.create_all(bind=test_engine, tables=[User.__table__, Document.__table__])
+    TestingSessionLocal = sessionmaker(
+        bind=test_engine, autocommit=False, autoflush=False
+    )
 
-    def override_get_db():
+
+    auth_db = TestingSessionLocal()
+    admin = User(
+        email="admin@example.com",
+        normalized_email="admin@example.com",
+        password_hash="test-only",
+        role="admin",
+        is_active=True,
+    )
+    auth_db.add(admin)
+    auth_db.commit()
+    auth_db.refresh(admin)
+    admin_id = admin.id
+    auth_db.close()
+
+    def override_postgres_db():
         db = TestingSessionLocal()
         try:
             yield db
         finally:
             db.close()
 
-    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_postgres_db] = override_postgres_db
 
     with TestClient(app) as tc:
+        from app.security.jwt import create_access_token
+
+        tc.headers.update({"Authorization": f"Bearer {create_access_token(admin_id)}"})
         yield tc
 
+
     app.dependency_overrides.clear()
-    # 恢复 rag_service 为 None，避免测试副作用残留
-    doc_mod._rag_service = None
 
 
 # ===================================================================
@@ -224,7 +277,7 @@ class TestPdfUploadAndSearch:
         )
         return resp
 
-    def test_upload_pdf_success(self, upload_result):
+    def test_upload_pdf_success(self, upload_result, client):
         """PDF 上传应返回 201 且包含 chunk_count。"""
         assert upload_result.status_code == 201, upload_result.text
         data = upload_result.json()
@@ -232,6 +285,11 @@ class TestPdfUploadAndSearch:
         assert data["file_type"] == "pdf"
         assert data["chunk_count"] > 0
         assert data["document_id"] > 0
+        calls = client.app.state.fake_document_indexing.calls
+        assert len(calls) >= 1
+        indexed_document, indexed_chunks = calls[0]
+        assert indexed_document.document_id == data["document_id"]
+        assert len(indexed_chunks) == data["chunk_count"]
 
     def test_chunks_have_multiple(self, upload_result):
         """长文本应产生多个 chunk。"""

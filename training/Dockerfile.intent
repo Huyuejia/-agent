@@ -1,0 +1,32 @@
+FROM python:3.10-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN python -m pip install --upgrade pip setuptools wheel
+RUN python -m pip install torch==2.12.1 --index-url https://download.pytorch.org/whl/cu126
+
+COPY training/requirements-onnx.txt /tmp/requirements-onnx.txt
+RUN python -m pip install -r /tmp/requirements-onnx.txt
+
+COPY training/__init__.py training/__init__.py
+COPY training/intent_classifier.py training/intent_classifier.py
+COPY training/onnx_intent_classifier.py training/onnx_intent_classifier.py
+COPY training/model_api.py training/model_api.py
+
+RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
+USER appuser
+
+ENV MODEL_RUNTIME=onnx
+ENV MODEL_ONNX_PATH=/models/intent
+ENV MODEL_ONNX_PROVIDER=CUDAExecutionProvider
+ENV MODEL_VERSION=intent-qwen2.5-1.5b-onnx-fp16-v1
+
+EXPOSE 8001
+
+HEALTHCHECK --interval=20s --timeout=5s --start-period=180s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready', timeout=3)"
+
+CMD ["python", "-m", "uvicorn", "training.model_api:app", "--host", "0.0.0.0", "--port", "8001"]

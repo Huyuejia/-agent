@@ -3,13 +3,24 @@ uvicorn[standard]==0.34.0
 pydantic==2.10.3
 pydantic-settings==2.7.0
 sqlalchemy==2.0.36
-pymysql==1.1.1
 cryptography==44.0.0
 neo4j==5.27.0
-chromadb==0.5.23
 python-multipart==0.0.18
 pytest==8.3.4
 pytest-asyncio==0.25.0
 PyMuPDF==1.25.2
 python-docx==1.1.2
+# RTX 4060 / driver 566.x: pin CUDA 12.4 instead of resolving to CUDA 13.
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.6.0+cu124
 sentence-transformers==3.3.1
+transformers==4.46.3
+scikit-learn==1.5.2
+psycopg[binary]==3.2.3
+alembic==1.13.3
+pgvector==0.3.6
+jieba==0.42.1
+redis==5.3.1
+PyJWT[crypto]==2.13.0
+argon2-cffi==25.1.0
+email-validator==2.3.0

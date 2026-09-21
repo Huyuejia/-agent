@@ -37,14 +37,21 @@ MATCH (a:Product {name: $product_a})-[r:COMPATIBLE_WITH]-(b:Product {name: $prod
 RETURN count(r) > 0 AS compatible
 """
 
-# 模板 2：查询某商品支持的所有协议
+# 模板 2：查询与某商品直接兼容的所有商品
+_TEMPLATE_COMPATIBLE_PRODUCTS = """
+MATCH (p:Product {name: $product_name})-[:COMPATIBLE_WITH]-(other:Product)
+RETURN other.name AS product
+ORDER BY product
+"""
+
+# 模板 3：查询某商品支持的所有协议
 _TEMPLATE_PROTOCOLS = """
 MATCH (p:Product {name: $product_name})-[:SUPPORTS]->(prot:Protocol)
 RETURN prot.name AS protocol
 ORDER BY protocol
 """
 
-# 模板 3：查询某商品的保修政策
+# 模板 4：查询某商品的保修政策
 _TEMPLATE_WARRANTY = """
 MATCH (p:Product {name: $product_name})-[:COVERED_BY]->(pol:Policy)
 RETURN pol.name AS policy_name,
@@ -72,6 +79,17 @@ class GraphService:
             {"product_a": product_a, "product_b": product_b},
         )
         return record["compatible"] if record else False
+
+    def get_compatible_products(self, product_name: str) -> list[str]:
+        """返回与 product_name 直接兼容的商品名称列表。"""
+        _validate_product(product_name)
+
+        records = self._run_template(
+            _TEMPLATE_COMPATIBLE_PRODUCTS,
+            {"product_name": product_name},
+            expect_many=True,
+        )
+        return [record["product"] for record in records]
 
     # ------------------------------------------------------------------
     # 查询 2: 协议

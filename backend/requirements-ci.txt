@@ -1,0 +1,23 @@
+# CPU-only dependencies needed by the automated backend test suite.
+# Model-serving dependencies (torch, transformers, sentence-transformers) are
+# intentionally excluded because BGE-M3 loading is lazy and unit tests inject a fake loader.
+fastapi==0.115.6
+httpx==0.28.1
+pydantic==2.10.3
+pydantic-settings==2.7.0
+sqlalchemy==2.0.36
+cryptography==44.0.0
+neo4j==5.27.0
+python-multipart==0.0.18
+pytest==8.3.4
+pytest-asyncio==0.25.0
+PyMuPDF==1.25.2
+python-docx==1.1.2
+psycopg[binary]==3.2.3
+alembic==1.13.3
+pgvector==0.3.6
+jieba==0.42.1
+redis==5.3.1
+PyJWT[crypto]==2.13.0
+argon2-cffi==25.1.0
+email-validator==2.3.0

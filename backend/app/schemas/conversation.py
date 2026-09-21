@@ -23,7 +23,7 @@ class ChatRequest(BaseModel):
 
 
 class MessageSource(BaseModel):
-    source_type: str  # "knowledge_graph" | "document_rag"
+    source_type: str  # "knowledge_graph" | "document_rag" | "exact"
     document_name: str | None = None
     location: str | None = None
     snippet: str | None = None
@@ -38,3 +38,8 @@ class ChatResponse(BaseModel):
     source_type: str
     sources: list[MessageSource]
     handoff_required: bool
+    execution_mode: str | None = None
+    agent_run_id: str | None = None
+    task_status: str | None = None
+    needs_user_input: bool = False
+    requested_fields: list[str] = Field(default_factory=list)

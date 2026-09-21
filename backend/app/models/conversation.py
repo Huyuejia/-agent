@@ -1,18 +1,15 @@
-"""
-MySQL 模型: conversations + messages
-"""
+"""PostgreSQL 会话与消息模型。"""
 
 from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, ForeignKey, func
-from sqlalchemy.orm import declarative_base, relationship
 
-Base = declarative_base()
+from app.models.base import Base
 
 
 class Conversation(Base):
     __tablename__ = "conversations"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    demo_user_id = Column(Integer, nullable=False, default=1)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     title = Column(String(255), nullable=False, default="新会话")
     created_at = Column(DateTime, server_default=func.now())
 

@@ -1,26 +1,59 @@
 
 
 services:
-  mysql:
-    image: mysql:8.0
-    container_name: ciw-mysql
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    image: customer-intelligence-gateway:local
+    container_name: ciw-gateway
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-demo123456}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-customer_workbench}
-      MYSQL_USER: ${MYSQL_USER:-demo_user}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-demo_pass}
+      GATEWAY_ADDR: ${GATEWAY_ADDR:-:8080}
+      UPSTREAM_URL: ${UPSTREAM_URL:-http://host.docker.internal:8000}
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
+      JWT_ISSUER: ${JWT_ISSUER:-customer-intelligence-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-customer-intelligence-api}
+      UPSTREAM_TIMEOUT: ${UPSTREAM_TIMEOUT:-30s}
+      READINESS_TIMEOUT: ${READINESS_TIMEOUT:-2s}
+      READ_HEADER_TIMEOUT: ${READ_HEADER_TIMEOUT:-5s}
+      READ_TIMEOUT: ${READ_TIMEOUT:-30s}
+      WRITE_TIMEOUT: ${WRITE_TIMEOUT:-35s}
+      IDLE_TIMEOUT: ${IDLE_TIMEOUT:-60s}
+      GATEWAY_REDIS_URL: ${GATEWAY_REDIS_URL:-redis://redis:6379/0}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_KEY_PREFIX: ${RATE_LIMIT_KEY_PREFIX:-ciw:gateway:ratelimit:v1}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1m}
+      RATE_LIMIT_REDIS_TIMEOUT: ${RATE_LIMIT_REDIS_TIMEOUT:-100ms}
+      RATE_LIMIT_AUTH_REQUESTS: ${RATE_LIMIT_AUTH_REQUESTS:-10}
+      RATE_LIMIT_CHAT_REQUESTS: ${RATE_LIMIT_CHAT_REQUESTS:-20}
+      RATE_LIMIT_USER_REQUESTS: ${RATE_LIMIT_USER_REQUESTS:-60}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
-      - "${MYSQL_PORT:-3306}:3306"
+      - "${GATEWAY_PORT:-8080}:8080"
     volumes:
-      - mysql-data:/var/lib/mysql
+      - ${JWT_PUBLIC_KEY_PATH:-./secrets/jwt-public.pem}:/run/secrets/jwt-public.pem:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-demo123456}"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ciw-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 40s
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+      start_period: 10s
 
   neo4j:
     image: neo4j:5
@@ -42,6 +75,60 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+  intent-model:
+    build:
+      context: .
+      dockerfile: training/Dockerfile.intent
+    image: customer-intelligence-intent-onnx:local
+    container_name: ciw-intent-model
+    restart: unless-stopped
+    environment:
+      MODEL_RUNTIME: onnx
+      MODEL_ONNX_PATH: /models/intent
+      MODEL_ONNX_PROVIDER: CUDAExecutionProvider
+      MODEL_VERSION: intent-qwen2.5-1.5b-onnx-fp16-v1
+    ports:
+      - "${MODEL_PORT:-8001}:8001"
+    volumes:
+      - ${MODEL_ONNX_HOST_PATH:-./training/runs/qlora-20260627/deployment/onnx-fp16}:/models/intent:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready', timeout=3)"
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
+    stop_grace_period: 30s
+
+  postgres:
+    image: pgvector/pgvector:0.7.4-pg16
+    container_name: ciw-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-customer_workbench}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-customer_workbench}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 volumes:
-  mysql-data:
   neo4j-data:
+  postgres-data:

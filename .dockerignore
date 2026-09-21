@@ -1,0 +1,13 @@
+.git
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+training/.cache/
+training/runs/
+training/tests/
+backend/
+frontend/
+graph/
+docs/
+*.pptx
+*.pdf
