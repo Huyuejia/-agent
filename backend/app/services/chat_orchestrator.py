@@ -281,22 +281,15 @@ class ChatOrchestrator:
                 if conversation is None:
                     raise ValueError("conversation does not exist")
                 user_id = conversation.user_id
-            waiting_run_id = self._agent_service.waiting_run_id(
+            result = self._agent_service.try_resume(
+                message=message,
                 conversation_id=conversation_id,
                 user_id=user_id,
+                request_id=request_id or current_request_id(),
+                resume_fields=resume_fields,
                 db=db,
             )
-            if waiting_run_id:
-                result = self._agent_service.execute(
-                    objective=message,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    request_id=request_id or current_request_id(),
-                    boundary_reason="waiting_task_resume",
-                    resume_run_id=waiting_run_id,
-                    resume_fields=resume_fields,
-                    db=db,
-                )
+            if result is not None:
                 self._save_result(db, conversation_id, message, result)
                 return {"conversation_id": conversation_id, **result}
         decision = self._execution_router.decide(message)

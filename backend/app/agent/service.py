@@ -69,6 +69,35 @@ class AgentTaskService:
             .order_by(AgentRun.started_at.desc())
         )
 
+    def try_resume(
+        self,
+        *,
+        message: str,
+        conversation_id: int,
+        user_id: int,
+        request_id: str,
+        db: Session,
+        resume_fields: dict[str, str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Resume the latest waiting task, or report that none was handled."""
+        waiting_run_id = self.waiting_run_id(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            db=db,
+        )
+        if waiting_run_id is None:
+            return None
+        return self.execute(
+            objective=message,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            request_id=request_id,
+            boundary_reason="waiting_task_resume",
+            db=db,
+            resume_run_id=waiting_run_id,
+            resume_fields=resume_fields,
+        )
+
     def active_run_id(self, *, conversation_id: int, user_id: int, db: Session) -> str | None:
         return db.scalar(
             select(AgentRun.id)

@@ -41,6 +41,83 @@ class FakeDb:
         self.commit_count += 1
 
 
+class ResumeOnlyAgentService:
+    def __init__(self, result=None):
+        self.result = result
+        self.calls = []
+
+    def waiting_run_id(self, **_kwargs):
+        raise AssertionError("ChatOrchestrator must not query waiting AgentRun")
+
+    def try_resume(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
+    def execute(self, **_kwargs):
+        raise AssertionError("a resumed task should not start a new Agent task")
+
+
+def _agent_result():
+    return {
+        "answer": "已恢复任务并完成。",
+        "intent": "agent_dynamic_task",
+        "confidence": 1.0,
+        "source_type": "agent",
+        "sources": [],
+        "handoff_required": False,
+        "execution_mode": "agent",
+        "agent_run_id": "run-1",
+        "task_status": "SUCCEEDED",
+    }
+
+
+def test_orchestrator_delegates_waiting_lookup_and_resume_to_agent_service():
+    service = ResumeOnlyAgentService(result=_agent_result())
+    db = FakeDb()
+    orchestrator = ChatOrchestrator(agent_service=service)
+
+    result = orchestrator.route(
+        message="Cam-A1",
+        conversation_id=7,
+        user_id=42,
+        request_id="request-1",
+        db=db,
+    )
+
+    assert result["agent_run_id"] == "run-1"
+    assert service.calls == [
+        {
+            "message": "Cam-A1",
+            "conversation_id": 7,
+            "user_id": 42,
+            "request_id": "request-1",
+            "resume_fields": None,
+            "db": db,
+        }
+    ]
+
+
+def test_orchestrator_continues_new_routing_when_agent_resume_is_not_handled():
+    service = ResumeOnlyAgentService(result=None)
+    classifier = FakeClassifier()
+    db = FakeDb()
+    orchestrator = ChatOrchestrator(
+        classifier=classifier,
+        agent_service=service,
+    )
+
+    result = orchestrator.route(
+        message="我要投诉这次服务",
+        conversation_id=7,
+        user_id=42,
+        db=db,
+    )
+
+    assert classifier.last_text == "我要投诉这次服务"
+    assert result["intent"] == "complaint"
+    assert service.calls[0]["message"] == "我要投诉这次服务"
+
+
 def test_injected_classifier_controls_route():
     classifier = FakeClassifier()
     db = FakeDb()

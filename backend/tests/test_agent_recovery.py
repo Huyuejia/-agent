@@ -158,10 +158,12 @@ def test_waiting_task_resumes_from_persisted_state_without_replacing_objective()
     run = db.get(AgentRun, waiting["agent_run_id"])
     assert run.task_state["missing_information"] == ["product_name"]
 
-    completed = _execute(
-        service, db, user, conversation,
-        objective="Cam-A1",
-        resume_run_id=waiting["agent_run_id"],
+    completed = service.try_resume(
+        message="Cam-A1",
+        conversation_id=conversation.id,
+        user_id=user.id,
+        request_id="request-recovery",
+        db=db,
         resume_fields={"product_name": "Cam-A1"},
     )
 
